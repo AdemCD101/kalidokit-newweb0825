@@ -440,22 +440,39 @@ export default forwardRef(function FaceHUD(
                   const tongueY = canvasCy + (tongueExtension * openness * h * 0.04)
 
                   // 舌头大小：随伸出程度和开口程度变化
-                  const baseWidth = w * 0.02
-                  const baseHeight = h * 0.012
-                  const tongueWidth = baseWidth * (1 + tongueExtension * 0.8)
-                  const tongueHeight = baseHeight * (1 + tongueExtension * 1.2 + openness * 0.5)
+                  const tongueWidth = w * 0.025 * (1 + tongueExtension * 0.6)
+                  const tongueLength = h * 0.02 * (1 + tongueExtension * 1.5 + openness * 0.8)
 
-                  // 绘制舌头（椭圆形，颜色随伸出程度变化）
-                  const alpha = 0.7 + tongueExtension * 0.2
-                  ctx.fillStyle = `rgba(255,105,180,${alpha})`
+                  // 绘制 U 型舌头轮廓
+                  const alpha = 0.8 + tongueExtension * 0.2
+                  ctx.strokeStyle = `rgba(255,105,180,${alpha})`
+                  ctx.lineWidth = 2 + tongueExtension * 1.5
+                  ctx.lineCap = 'round'
+                  ctx.lineJoin = 'round'
+
                   ctx.beginPath()
-                  ctx.ellipse(canvasCx, tongueY, tongueWidth, tongueHeight, 0, 0, Math.PI * 2)
-                  ctx.fill()
+                  // U 型曲线：左侧 -> 底部 -> 右侧
+                  const leftX = canvasCx - tongueWidth / 2
+                  const rightX = canvasCx + tongueWidth / 2
+                  const bottomY = tongueY + tongueLength
 
-                  // 如果舌头明显伸出，添加舌头轮廓
-                  if (tongueExtension > 0.3) {
-                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.8})`
+                  // 左侧弧线
+                  ctx.moveTo(canvasCx, tongueY)
+                  ctx.quadraticCurveTo(leftX, tongueY + tongueLength * 0.3, leftX, bottomY - tongueLength * 0.2)
+                  // 底部弧线
+                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.2)
+                  // 右侧弧线
+                  ctx.quadraticCurveTo(rightX, tongueY + tongueLength * 0.3, canvasCx, tongueY)
+
+                  ctx.stroke()
+
+                  // 如果舌头明显伸出，添加舌头中线
+                  if (tongueExtension > 0.4) {
+                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.6})`
                     ctx.lineWidth = 1
+                    ctx.beginPath()
+                    ctx.moveTo(canvasCx, tongueY)
+                    ctx.lineTo(canvasCx, bottomY - tongueLength * 0.1)
                     ctx.stroke()
                   }
                 }
@@ -561,18 +578,27 @@ export default forwardRef(function FaceHUD(
                   const tongueExtension = Math.max(0, (maxRedY / sampleSize - 0.5) * 2)
                   const openness = Math.max(jawOpen, mouthOpen)
                   const tongueY = canvasCy + (tongueExtension * openness * h * 0.04)
-                  const tongueWidth = w * 0.02 * (1 + tongueExtension * 0.8)
-                  const tongueHeight = h * 0.012 * (1 + tongueExtension * 1.2 + openness * 0.5)
-                  const alpha = 0.7 + tongueExtension * 0.2
+                  const tongueWidth = w * 0.025 * (1 + tongueExtension * 0.6)
+                  const tongueLength = h * 0.02 * (1 + tongueExtension * 1.5 + openness * 0.8)
+                  const alpha = 0.8 + tongueExtension * 0.2
 
-                  ctx.fillStyle = `rgba(255,105,180,${alpha})`
+                  // 绘制 U 型舌头轮廓（线框模式）
+                  ctx.strokeStyle = `rgba(255,105,180,${alpha})`
+                  ctx.lineWidth = 2 + tongueExtension * 1.5
+                  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+
                   ctx.beginPath()
-                  ctx.ellipse(canvasCx, tongueY, tongueWidth, tongueHeight, 0, 0, Math.PI * 2)
-                  ctx.fill()
+                  const leftX = canvasCx - tongueWidth / 2, rightX = canvasCx + tongueWidth / 2
+                  const bottomY = tongueY + tongueLength
+                  ctx.moveTo(canvasCx, tongueY)
+                  ctx.quadraticCurveTo(leftX, tongueY + tongueLength * 0.3, leftX, bottomY - tongueLength * 0.2)
+                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.2)
+                  ctx.quadraticCurveTo(rightX, tongueY + tongueLength * 0.3, canvasCx, tongueY)
+                  ctx.stroke()
 
-                  if (tongueExtension > 0.3) {
-                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.8})`
-                    ctx.lineWidth = 1; ctx.stroke()
+                  if (tongueExtension > 0.4) {
+                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.6})`; ctx.lineWidth = 1
+                    ctx.beginPath(); ctx.moveTo(canvasCx, tongueY); ctx.lineTo(canvasCx, bottomY - tongueLength * 0.1); ctx.stroke()
                   }
                 }
               }
@@ -746,18 +772,27 @@ export default forwardRef(function FaceHUD(
                   const tongueExtension = Math.max(0, (maxRedY / sampleSize - 0.5) * 2)
                   const openness = Math.max(jawOpen, mouthOpen)
                   const tongueY = canvasCy + (tongueExtension * openness * h * 0.04)
-                  const tongueWidth = w * 0.02 * (1 + tongueExtension * 0.8)
-                  const tongueHeight = h * 0.012 * (1 + tongueExtension * 1.2 + openness * 0.5)
-                  const alpha = 0.7 + tongueExtension * 0.2
+                  const tongueWidth = w * 0.025 * (1 + tongueExtension * 0.6)
+                  const tongueLength = h * 0.02 * (1 + tongueExtension * 1.5 + openness * 0.8)
+                  const alpha = 0.8 + tongueExtension * 0.2
 
-                  ctx.fillStyle = `rgba(255,105,180,${alpha})`
+                  // 绘制 U 型舌头轮廓（面具模式）
+                  ctx.strokeStyle = `rgba(255,105,180,${alpha})`
+                  ctx.lineWidth = 2 + tongueExtension * 1.5
+                  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+
                   ctx.beginPath()
-                  ctx.ellipse(canvasCx, tongueY, tongueWidth, tongueHeight, 0, 0, Math.PI * 2)
-                  ctx.fill()
+                  const leftX = canvasCx - tongueWidth / 2, rightX = canvasCx + tongueWidth / 2
+                  const bottomY = tongueY + tongueLength
+                  ctx.moveTo(canvasCx, tongueY)
+                  ctx.quadraticCurveTo(leftX, tongueY + tongueLength * 0.3, leftX, bottomY - tongueLength * 0.2)
+                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.2)
+                  ctx.quadraticCurveTo(rightX, tongueY + tongueLength * 0.3, canvasCx, tongueY)
+                  ctx.stroke()
 
-                  if (tongueExtension > 0.3) {
-                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.8})`
-                    ctx.lineWidth = 1; ctx.stroke()
+                  if (tongueExtension > 0.4) {
+                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.6})`; ctx.lineWidth = 1
+                    ctx.beginPath(); ctx.moveTo(canvasCx, tongueY); ctx.lineTo(canvasCx, bottomY - tongueLength * 0.1); ctx.stroke()
                   }
                 }
               }
