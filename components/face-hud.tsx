@@ -4,6 +4,7 @@ import type React from "react"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { createFaceLandmarker, hasMediapipeSupport } from "@/lib/tracking/mediapipe"
+import { FACE_OVAL, LEFT_EYE, RIGHT_EYE, LEFT_EYEBROW, RIGHT_EYEBROW, LIPS_OUTER, LIPS_INNER, NOSE_BOTTOM } from "./face-constants"
 
 export type FaceHUDHandle = {
   start: () => Promise<void>
@@ -307,24 +308,15 @@ export default forwardRef(function FaceHUD(
 
   // MediaPipe Face Mesh 官方连接定义
   const FACEMESH_CONTOURS = {
-    // 面部轮廓
-    faceOval: [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109],
-
-    // 左眼轮廓
-    leftEye: [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246],
-    leftEyebrow: [46, 53, 52, 51, 48],
-
-    // 右眼轮廓
-    rightEye: [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398],
-    rightEyebrow: [276, 283, 282, 281, 278],
-
-    // 嘴唇轮廓
-    lipsOuter: [61, 84, 17, 314, 405, 320, 307, 375, 321, 308, 324, 318],
-    lipsInner: [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 324],
-
-    // 鼻子轮廓
-    noseBottom: [20, 94, 125, 141, 235, 31, 228, 229, 230, 231, 232, 233, 244, 245, 122, 6, 202, 214, 234],
-    noseTip: [1, 2]
+    faceOval: FACE_OVAL,
+    leftEye: LEFT_EYE,
+    rightEye: RIGHT_EYE,
+    leftEyebrow: LEFT_EYEBROW,
+    rightEyebrow: RIGHT_EYEBROW,
+    lipsOuter: LIPS_OUTER,
+    lipsInner: LIPS_INNER,
+    noseBottom: NOSE_BOTTOM,
+    noseTip: [1,2],
   }
 
   // 设置画布的高DPI支持
@@ -350,9 +342,7 @@ export default forwardRef(function FaceHUD(
     const mirrored = mirrorRef.current
 
     if (m === "points") {
-      // 点阵模式 - 显示全部468个关键点
-      const dpr = setupCanvasTransform(ctx, w, h, mirrored)
-
+      // 点阵模式 - 显示全部468个关键点（loop 中已处理清屏/镜像/缩放）
       // 绘制所有关键点
       ctx.fillStyle = '#ffffff'
       for (const point of points) {
@@ -391,8 +381,7 @@ export default forwardRef(function FaceHUD(
     }
 
     if (m === "wireframe") {
-      // 线框模式 - 使用官方连接索引
-      const dpr = setupCanvasTransform(ctx, w, h, mirrored)
+      // 线框模式 - 使用官方连接索引（loop 中已处理清屏/镜像/缩放）
 
       // 绘制连接线的辅助函数
       const drawConnectors = (indices: number[], color: string, lineWidth = 1) => {
@@ -449,8 +438,7 @@ export default forwardRef(function FaceHUD(
     }
 
     if (m === "mask") {
-      // 灰色面具模式 - 使用 Path2D 和 evenodd 填充
-      const dpr = setupCanvasTransform(ctx, w, h, mirrored)
+      // 灰色面具模式 - 使用 Path2D 和 evenodd 填充（loop 中已处理清屏/镜像/缩放）
 
       // 创建面部外轮廓路径
       const facePath = new Path2D()
@@ -667,16 +655,19 @@ export default forwardRef(function FaceHUD(
   const canvasHeight = height || size
 
   useEffect(() => {
-    // Resize canvas when size changes (throttled to prevent excessive redraws)
     const c = canvasRef.current
     if (!c) return
-
-    // Only resize if dimensions actually changed
-    if (c.width === canvasWidth && c.height === canvasHeight) return
-
-    console.log("[FaceHUD] Setting canvas size:", canvasWidth, "x", canvasHeight)
-    c.width = canvasWidth
-    c.height = canvasHeight
+    const dpr = window.devicePixelRatio || 1
+    const targetW = Math.max(1, Math.floor(canvasWidth * dpr))
+    const targetH = Math.max(1, Math.floor(canvasHeight * dpr))
+    if (c.width !== targetW || c.height !== targetH) {
+      console.log("[FaceHUD] Setting canvas size (phys/css):", targetW, "x", targetH, " / ", canvasWidth, "x", canvasHeight)
+      c.width = targetW
+      c.height = targetH
+      // 同步 CSS 尺寸
+      c.style.width = `${canvasWidth}px`
+      c.style.height = `${canvasHeight}px`
+    }
   }, [canvasWidth, canvasHeight])
 
 
