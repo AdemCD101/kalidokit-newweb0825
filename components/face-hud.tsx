@@ -411,11 +411,11 @@ export default forwardRef(function FaceHUD(
       // 左/右眉：亮绿
       drawEdges(CONTOUR_EDGES[5], '#44ff88', 1.5)
       drawEdges(CONTOUR_EDGES[6], '#44ff88', 1.5)
-      // 鼻下与鼻梁：亮黄
-      drawEdges(CONTOUR_EDGES[7], '#ffdd44', 1.2)
+      // 鼻梁（避免跨面大折线）：亮黄
+      if (CONTOUR_EDGES[8]) drawEdges(CONTOUR_EDGES[8], '#ffdd44', 1.2)
 
-      // 可选：全网格（浅灰）——这里默认开启，如需关闭可调颜色透明度为0或加开关
-      drawEdges(TESSELLATION_EDGES, 'rgba(255,255,255,0.18)', 0.6)
+      // 全网格（浅灰）降低强度，避免视觉干扰
+      drawEdges(TESSELLATION_EDGES, 'rgba(255,255,255,0.10)', 0.5)
 
       // 鼻尖点
       for (const idx of FACEMESH_CONTOURS.noseTip) {
@@ -479,10 +479,35 @@ export default forwardRef(function FaceHUD(
       ctx.fillStyle = 'rgba(200,200,200,0.45)'
       ctx.fill(combinedPath, 'evenodd')
 
-      // 描边
-      ctx.strokeStyle = '#ffffff'
-      ctx.lineWidth = 0.8
-      ctx.stroke(facePath)
+      // 在面具上叠加五官的线框（与 wireframe 一致的亮色），增强“有五官”的观感
+      const drawEdges = (edges: [number,number][], color: string, lw = 1) => {
+        ctx.strokeStyle = color
+        ctx.lineWidth = lw
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        ctx.beginPath()
+        for (const [a,b] of edges) {
+          if (!points[a] || !points[b]) continue
+          ctx.moveTo(points[a][0], points[a][1])
+          ctx.lineTo(points[b][0], points[b][1])
+        }
+        ctx.stroke()
+      }
+      // 外框细描
+      drawEdges(CONTOUR_EDGES[0], '#ffffff', 1.0)
+      // 眉
+      drawEdges(CONTOUR_EDGES[5], '#44ff88', 1.2)
+      drawEdges(CONTOUR_EDGES[6], '#44ff88', 1.2)
+      // 眼
+      drawEdges(CONTOUR_EDGES[1], '#00ddff', 1.0)
+      drawEdges(CONTOUR_EDGES[2], '#00ddff', 1.0)
+      // 嘴
+      drawEdges(CONTOUR_EDGES[3], '#ff4466', 1.1)
+      drawEdges(CONTOUR_EDGES[4], '#ff6688', 0.9)
+      // 鼻下/鼻梁
+      drawEdges(CONTOUR_EDGES[7], '#ffdd44', 1.0)
+      if (CONTOUR_EDGES[8]) drawEdges(CONTOUR_EDGES[8], '#ffdd44', 1.0)
+
       return
     }
   }
