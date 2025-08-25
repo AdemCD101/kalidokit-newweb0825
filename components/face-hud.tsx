@@ -493,30 +493,58 @@ export default forwardRef(function FaceHUD(
         }
         ctx.stroke()
       }
-      // 面具上仅叠加“眉、眼、唇外环”，避免鼻部折线造成奇怪的内线
+
+      // 计算辅助中心与尺寸
+      const getCenter = (idxs: number[]) => {
+        let sx = 0, sy = 0, n = 0
+        for (const i of idxs) { const p = points[i]; if (!p) continue; sx += p[0]; sy += p[1]; n++ }
+        return n ? { x: sx / n, y: sy / n, n } : { x: 0, y: 0, n: 0 }
+      }
+      const faceBox = (() => {
+        let minX=Infinity, maxX=-Infinity
+        for (const i of FACE_OVAL) { const p = points[i]; if (!p) continue; minX=Math.min(minX,p[0]); maxX=Math.max(maxX,p[0]) }
+        return { width: (isFinite(minX)&&isFinite(maxX)) ? (maxX-minX) : 0 }
+      })()
+
       // 眉
       drawEdges(CONTOUR_EDGES[5], '#44ff88', 1.2)
       drawEdges(CONTOUR_EDGES[6], '#44ff88', 1.2)
+
       // 眼
       drawEdges(CONTOUR_EDGES[1], '#00ddff', 1.0)
       drawEdges(CONTOUR_EDGES[2], '#00ddff', 1.0)
-      // 唇（仅外环）
-      drawEdges(CONTOUR_EDGES[3], '#ff4466', 1.1)
-      // 鼻梁（短线）与鼻翼（鼻孔外缘）——避免跨面长折线
-      drawEdges(CONTOUR_EDGES[8], '#ffdd44', 1.0)
-      const drawNostrils = (idxs: number[]) => {
-        for (let i = 1; i < idxs.length; i++) {
-          const a = idxs[i - 1], b = idxs[i]
-          if (!points[a] || !points[b]) continue
-          ctx.strokeStyle = '#ffdd44'
-          ctx.lineWidth = 1.0
-          ctx.beginPath()
-          ctx.moveTo(points[a][0], points[a][1])
-          ctx.lineTo(points[b][0], points[b][1])
-          ctx.stroke()
+
+      // 唇（外环）- 区分上下唇颜色
+      const mouthCenter = getCenter(LIPS_OUTER)
+      const isUpper = (p: number[]) => p[1] <= mouthCenter.y
+      for (const [a,b] of CONTOUR_EDGES[3]) {
+        const pa = points[a], pb = points[b]; if (!pa || !pb) continue
+        const bothUpper = isUpper(pa) && isUpper(pb)
+        ctx.strokeStyle = bothUpper ? '#ff6b88' : '#d61f2b' // 上唇较亮、下唇较深
+        ctx.lineWidth = 1.2
+        ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.stroke()
+      }
+
+      // 鼻子：短鼻梁 + 限幅鼻翼（靠近中心的短弧），避免出现跨面长斜线
+      // 短鼻梁（仅取前两段）
+      const bridge = [168,6,197]
+      for (let i=1;i<bridge.length;i++) {
+        const a = bridge[i-1], b = bridge[i]
+        const pa = points[a], pb = points[b]; if (!pa||!pb) continue
+        ctx.strokeStyle = '#ffdd44'; ctx.lineWidth = 1.0
+        ctx.beginPath(); ctx.moveTo(pa[0],pa[1]); ctx.lineTo(pb[0],pb[1]); ctx.stroke()
+      }
+      // 鼻翼：从 NOSE_BOTTOM 过滤，限制在鼻中心附近且位于中心下方
+      const noseCenter = getCenter(NOSE_BOTTOM)
+      const r = faceBox.width * 0.10 // 只保留鼻中心半径10%脸宽内的短线段
+      const dist = (p:number[]) => Math.hypot(p[0]-noseCenter.x, p[1]-noseCenter.y)
+      for (const [a,b] of CONTOUR_EDGES[7]) {
+        const pa = points[a], pb = points[b]; if (!pa||!pb) continue
+        if (dist(pa)<r && dist(pb)<r && pa[1]>noseCenter.y && pb[1]>noseCenter.y) {
+          ctx.strokeStyle = '#ffdd44'; ctx.lineWidth = 1.0
+          ctx.beginPath(); ctx.moveTo(pa[0],pa[1]); ctx.lineTo(pb[0],pb[1]); ctx.stroke()
         }
       }
-      drawNostrils(NOSE_NOSTRILS)
 
       return
     }
