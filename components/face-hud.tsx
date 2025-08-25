@@ -337,7 +337,7 @@ export default forwardRef(function FaceHUD(
 
 
   // 主绘制函数
-  function drawFace(ctx: CanvasRenderingContext2D, points: number[][], videoPts: number[][] | null, vw?: number, vh?: number) {
+  function drawFace(ctx: CanvasRenderingContext2D, points: number[][], videoPts: number[][] | null, vw?: number, vh?: number, blendshapes?: any[]) {
     const m = modeRef.current
     const w = ctx.canvas.width / (window.devicePixelRatio || 1)
     const h = ctx.canvas.height / (window.devicePixelRatio || 1)
@@ -379,37 +379,50 @@ export default forwardRef(function FaceHUD(
 
       // 舌头：当 mouth 内部出现显著的“粉色/红色”时，填充一个小的椭圆表示
       try {
-        if (videoPts && vw && vh) {
-          const scaleX = (v:number) => v * (w / vw)
-          const scaleY = (v:number) => v * (h / vh)
-          const mouth = LIPS_INNER.length ? LIPS_INNER : LIPS_OUTER
-          const mx = mouth.map(i => videoPts[i]).filter(Boolean) as number[][]
-          if (mx.length >= 3) {
-            // 计算内唇中心与范围
-            let sx=0, sy=0; for (const p of mx) { sx+=p[0]; sy+=p[1] }
-            const cx = sx / mx.length, cy = sy / mx.length
-            const rx = 0.06 * w, ry = 0.035 * h // 小椭圆
-            // 取样视频帧像素（基于画布，不复制整帧）
-            const sCanvas = sampleCanvasRef.current || (sampleCanvasRef.current = document.createElement('canvas'))
-            const sctx = sCanvas.getContext('2d')
-            const video = videoRef.current!
-            sCanvas.width = 64; sCanvas.height = 64
-            if (sctx) {
-              sctx.drawImage(video, cx-32, cy-32, 64, 64, 0,0,64,64)
-              const img = sctx.getImageData(0,0,64,64).data
-              let redish = 0, total = 0
-              for (let i=0;i<img.length;i+=4){
-                const r=img[i], g=img[i+1], b=img[i+2]
-                // 简单红色检测：r高于g和b一定阈值
-                if (r>135 && r>g+25 && r>b+25) redish++
-                total++
-              }
-              const ratio = redish/total
-              if (ratio > 0.08) { // 有明显舌头红色
-                ctx.fillStyle = 'rgba(255,105,180,0.85)'
-                ctx.beginPath()
-                ctx.ellipse(cx * (w/vw), cy * (h/vh), rx, ry, 0, 0, Math.PI*2)
-                ctx.fill()
+        if (blendshapes && videoPts && vw && vh) {
+          // 1. 检查 blendshapes 中的嘴部开合度
+          const jawOpen = blendshapes.find((b: any) => b.categoryName === 'jawOpen')?.score || 0
+          const mouthOpen = blendshapes.find((b: any) => b.categoryName === 'mouthOpen')?.score || 0
+
+          // 嘴部需要有一定开合度才可能看到舌头
+          if (jawOpen > 0.15 || mouthOpen > 0.1) {
+            const mouth = LIPS_INNER.length ? LIPS_INNER : LIPS_OUTER
+            const mx = mouth.map(i => videoPts[i]).filter(Boolean) as number[][]
+            if (mx.length >= 3) {
+              // 计算内唇中心
+              let sx = 0, sy = 0
+              for (const p of mx) { sx += p[0]; sy += p[1] }
+              const cx = sx / mx.length, cy = sy / mx.length
+
+              // 采样 32x32 区域进行颜色检测
+              const sCanvas = sampleCanvasRef.current || (sampleCanvasRef.current = document.createElement('canvas'))
+              const sctx = sCanvas.getContext('2d')
+              const video = videoRef.current!
+              sCanvas.width = 32; sCanvas.height = 32
+              if (sctx) {
+                sctx.drawImage(video, cx - 16, cy - 16, 32, 32, 0, 0, 32, 32)
+                const img = sctx.getImageData(0, 0, 32, 32).data
+
+                let redPixels = 0, totalPixels = 0
+                for (let i = 0; i < img.length; i += 4) {
+                  const r = img[i], g = img[i + 1], b = img[i + 2]
+                  // 改进的红色检测：高红色值且饱和度足够
+                  if (r > 120 && r > g + 20 && r > b + 20 && (r - Math.max(g, b)) > 30) {
+                    redPixels++
+                  }
+                  totalPixels++
+                }
+
+                const redRatio = redPixels / totalPixels
+                if (redRatio > 0.12) { // 12% 以上红色像素认为有舌头
+                  // 绘制舌头标记（转换到画布坐标）
+                  const canvasCx = cx * (w / vw)
+                  const canvasCy = cy * (h / vh)
+                  ctx.fillStyle = 'rgba(255,105,180,0.8)'
+                  ctx.beginPath()
+                  ctx.ellipse(canvasCx, canvasCy, w * 0.025, h * 0.015, 0, 0, Math.PI * 2)
+                  ctx.fill()
+                }
               }
             }
           }
@@ -466,6 +479,53 @@ export default forwardRef(function FaceHUD(
           ctx.fill()
         }
       }
+
+      // 舌头检测与显示（线框模式）
+      try {
+        if (blendshapes && videoPts && vw && vh) {
+          const jawOpen = blendshapes.find((b: any) => b.categoryName === 'jawOpen')?.score || 0
+          const mouthOpen = blendshapes.find((b: any) => b.categoryName === 'mouthOpen')?.score || 0
+
+          if (jawOpen > 0.15 || mouthOpen > 0.1) {
+            const mouth = LIPS_INNER.length ? LIPS_INNER : LIPS_OUTER
+            const mx = mouth.map(i => videoPts[i]).filter(Boolean) as number[][]
+            if (mx.length >= 3) {
+              let sx = 0, sy = 0
+              for (const p of mx) { sx += p[0]; sy += p[1] }
+              const cx = sx / mx.length, cy = sy / mx.length
+
+              const sCanvas = sampleCanvasRef.current || (sampleCanvasRef.current = document.createElement('canvas'))
+              const sctx = sCanvas.getContext('2d')
+              const video = videoRef.current!
+              sCanvas.width = 32; sCanvas.height = 32
+              if (sctx) {
+                sctx.drawImage(video, cx - 16, cy - 16, 32, 32, 0, 0, 32, 32)
+                const img = sctx.getImageData(0, 0, 32, 32).data
+
+                let redPixels = 0, totalPixels = 0
+                for (let i = 0; i < img.length; i += 4) {
+                  const r = img[i], g = img[i + 1], b = img[i + 2]
+                  if (r > 120 && r > g + 20 && r > b + 20 && (r - Math.max(g, b)) > 30) {
+                    redPixels++
+                  }
+                  totalPixels++
+                }
+
+                const redRatio = redPixels / totalPixels
+                if (redRatio > 0.12) {
+                  const canvasCx = cx * (w / vw)
+                  const canvasCy = cy * (h / vh)
+                  ctx.fillStyle = 'rgba(255,105,180,0.8)'
+                  ctx.beginPath()
+                  ctx.ellipse(canvasCx, canvasCy, w * 0.025, h * 0.015, 0, 0, Math.PI * 2)
+                  ctx.fill()
+                }
+              }
+            }
+          }
+        }
+      } catch {}
+
       return
     }
 
@@ -586,6 +646,52 @@ export default forwardRef(function FaceHUD(
         }
       }
 
+      // 舌头检测与显示（面具模式）
+      try {
+        if (blendshapes && videoPts && vw && vh) {
+          const jawOpen = blendshapes.find((b: any) => b.categoryName === 'jawOpen')?.score || 0
+          const mouthOpen = blendshapes.find((b: any) => b.categoryName === 'mouthOpen')?.score || 0
+
+          if (jawOpen > 0.15 || mouthOpen > 0.1) {
+            const mouth = LIPS_INNER.length ? LIPS_INNER : LIPS_OUTER
+            const mx = mouth.map(i => videoPts[i]).filter(Boolean) as number[][]
+            if (mx.length >= 3) {
+              let sx = 0, sy = 0
+              for (const p of mx) { sx += p[0]; sy += p[1] }
+              const cx = sx / mx.length, cy = sy / mx.length
+
+              const sCanvas = sampleCanvasRef.current || (sampleCanvasRef.current = document.createElement('canvas'))
+              const sctx = sCanvas.getContext('2d')
+              const video = videoRef.current!
+              sCanvas.width = 32; sCanvas.height = 32
+              if (sctx) {
+                sctx.drawImage(video, cx - 16, cy - 16, 32, 32, 0, 0, 32, 32)
+                const img = sctx.getImageData(0, 0, 32, 32).data
+
+                let redPixels = 0, totalPixels = 0
+                for (let i = 0; i < img.length; i += 4) {
+                  const r = img[i], g = img[i + 1], b = img[i + 2]
+                  if (r > 120 && r > g + 20 && r > b + 20 && (r - Math.max(g, b)) > 30) {
+                    redPixels++
+                  }
+                  totalPixels++
+                }
+
+                const redRatio = redPixels / totalPixels
+                if (redRatio > 0.12) {
+                  const canvasCx = cx * (w / vw)
+                  const canvasCy = cy * (h / vh)
+                  ctx.fillStyle = 'rgba(255,105,180,0.8)'
+                  ctx.beginPath()
+                  ctx.ellipse(canvasCx, canvasCy, w * 0.025, h * 0.015, 0, 0, Math.PI * 2)
+                  ctx.fill()
+                }
+              }
+            }
+          }
+        }
+      } catch {}
+
       return
     }
   }
@@ -636,6 +742,7 @@ export default forwardRef(function FaceHUD(
           // 直接同步检测，像 Kalidokit 示例
           const res = faceRef.current.detectForVideo(video, now)
           const face = res?.faceLandmarks?.[0]
+          const blendshapes = res?.faceBlendshapes?.[0]?.categories || []
           if (face && face.length) {
             // 只在有检测结果时才清空和重绘
             ctx.clearRect(0, 0, w, h)
@@ -658,7 +765,7 @@ export default forwardRef(function FaceHUD(
 
             // 转换到画布坐标系进行绘制
             const canvasPts = sm.map((p: any) => [p[0] * w / vw, p[1] * h / vh, p[2]])
-            drawFace(ctx, canvasPts, sm, vw, vh)
+            drawFace(ctx, canvasPts, sm, vw, vh, blendshapes)
 
             ctx.restore()
 
