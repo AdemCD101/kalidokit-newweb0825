@@ -257,47 +257,200 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
     enablePose: boolean
     enableHands: boolean
     hud: {
-      mode: "points" | "mask"
-      position: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "custom"
-      draggable: boolean
+      mode: "points" | "mask" | "wireframe"
       size: number
     }
     face: {
       smoothing: number
       expressionIntensity: number
-      eye: { enable: boolean; blinkStrength: number; blinkSmoothing: number }
-      mouth: { enable: boolean; openSmoothing: number }
+      eye: { enable: boolean }
+      mouth: { enable: boolean }
     }
-    debug: { showLandmarks: boolean }
+    // 新增：多层平滑控制
+    smoothing: {
+      eyeRaw: number        // 眼部原始数据平滑
+      eyeFinal: number      // 眼部最终输出平滑
+      mouthRaw: number      // 嘴部原始数据平滑
+      mouthFinal: number    // 嘴部最终输出平滑
+    }
+    // 新增：微笑检测控制
+    smile: {
+      enable: boolean       // 启用微笑检测
+      sensitivity: number   // 微笑敏感度
+      amplification: number // 微笑放大倍数
+    }
+    debug: {
+      showLandmarks: boolean
+      showSmileDebug: boolean  // 显示微笑调试信息
+    }
   }
-  const [faceCfg, setFaceCfg] = useLocalStorage<FaceSettingsState>("studio.faceSettings", {
+  // 默认配置
+  const defaultFaceCfg: FaceSettingsState = {
     deviceId: null,
     resolution: "360p",
     mirror: true,
     faceFps: 30, // 恢复到 30fps，像 Kalidokit 示例
     enablePose: false,
     enableHands: false,
-    hud: { mode: "points", position: "bottom-right", draggable: false, size: 200 },
+    hud: { mode: "points", size: 200 },
     face: {
       smoothing: 0.6,
       expressionIntensity: 1,
-      eye: { enable: true, blinkStrength: 1, blinkSmoothing: 0.5 }, // 新增眨眼平滑
-      mouth: { enable: true, openSmoothing: 0.25 }, // 降低嘴部平滑，更自然
+      eye: { enable: true },
+      mouth: { enable: true },
     },
-    debug: { showLandmarks: true },
-  })
-  function updateFaceCfg(next: Partial<FaceSettingsState>) {
-    setFaceCfg({ ...faceCfg, ...next })
+    // 多层平滑默认值（基于我们的实现）
+    smoothing: {
+      eyeRaw: 0.7,      // 眼部原始数据平滑
+      eyeFinal: 0.2,    // 眼部最终输出平滑
+      mouthRaw: 0.5,    // 嘴部原始数据平滑
+      mouthFinal: 0.3,  // 嘴部最终输出平滑
+    },
+    // 微笑检测默认值
+    smile: {
+      enable: true,       // 启用微笑检测
+      sensitivity: 0.03,  // 微笑敏感度（阈值）
+      amplification: 3.2, // 微笑放大倍数
+    },
+    debug: {
+      showLandmarks: true,
+      showSmileDebug: false, // 默认关闭微笑调试
+    },
   }
 
-  // 面部设置页的独立预览开关（默认关闭以避免双重推理）
+  // 数据迁移函数
+  function migrateFaceCfg(stored: any): FaceSettingsState {
+    if (!stored) {
+      console.log("[LeftControlPanel] 使用默认配置")
+      return defaultFaceCfg
+    }
+
+    // 检查是否需要迁移
+    const needsMigration = !stored.smoothing || !stored.smile
+    if (needsMigration) {
+      console.log("[LeftControlPanel] 检测到旧配置，正在迁移...")
+    }
+
+    // 确保所有必需字段存在
+    const migrated = {
+      ...defaultFaceCfg,
+      ...stored,
+      // 确保嵌套对象完整
+      face: {
+        ...defaultFaceCfg.face,
+        ...stored.face,
+        eye: {
+          ...defaultFaceCfg.face.eye,
+          ...stored.face?.eye,
+        },
+        mouth: {
+          ...defaultFaceCfg.face.mouth,
+          ...stored.face?.mouth,
+        },
+      },
+      smoothing: {
+        ...defaultFaceCfg.smoothing,
+        ...stored.smoothing,
+      },
+      smile: {
+        ...defaultFaceCfg.smile,
+        ...stored.smile,
+      },
+      debug: {
+        ...defaultFaceCfg.debug,
+        ...stored.debug,
+      },
+      hud: {
+        ...defaultFaceCfg.hud,
+        ...stored.hud,
+        // 移除过时的位置和拖拽设置
+        mode: stored.hud?.mode || defaultFaceCfg.hud.mode,
+        size: stored.hud?.size || defaultFaceCfg.hud.size,
+      },
+    }
+
+    if (needsMigration) {
+      console.log("[LeftControlPanel] 配置迁移完成:", migrated)
+    }
+
+    return migrated
+  }
+
+  const [rawFaceCfg, setRawFaceCfg] = useLocalStorage<any>("studio.faceSettings", defaultFaceCfg)
+  const faceCfg = migrateFaceCfg(rawFaceCfg)
+  function updateFaceCfg(next: Partial<FaceSettingsState>) {
+    const updated = { ...faceCfg, ...next }
+    setRawFaceCfg(updated)
+  }
+
+  // 面部设置页的独立预览开关（默认开启以便用户看到效果）
   const facePreviewRef = useRef<FaceHUDHandle>(null)
-  const [previewOn, setPreviewOn] = useState(false)
+  const previewContainerRef = useRef<HTMLDivElement>(null)
+  const [previewOn, setPreviewOn] = useState(true) // 默认开启
+  const [modeChangeNotice, setModeChangeNotice] = useState<string | null>(null)
+  const [previewDimensions, setPreviewDimensions] = useState({ width: 400, height: 200 })
+
   useEffect(() => {
     if (!isFaceSettings) {
       setPreviewOn(false)
+    } else {
+      // 进入详细设置时自动开启预览
+      setPreviewOn(true)
     }
   }, [isFaceSettings])
+
+  // 监听预览容器尺寸变化
+  useEffect(() => {
+    const container = previewContainerRef.current
+    if (!container) return
+
+    const updateDimensions = () => {
+      const rect = container.getBoundingClientRect()
+      const containerWidth = Math.floor(rect.width)
+      const containerHeight = Math.floor(rect.height)
+
+      // 计算合适的 HUD 尺寸，保持 16:9 宽高比（现代摄像头标准比例）
+      const aspectRatio = 16 / 9
+      let hudWidth = containerWidth
+      let hudHeight = containerWidth / aspectRatio
+
+      // 如果高度超出容器，则以高度为准
+      if (hudHeight > containerHeight) {
+        hudHeight = containerHeight
+        hudWidth = containerHeight * aspectRatio
+      }
+
+      const newDimensions = {
+        width: Math.floor(hudWidth),
+        height: Math.floor(hudHeight)
+      }
+
+      console.log("[LeftControlPanel] HUD 预览尺寸计算:", {
+        container: { width: containerWidth, height: containerHeight },
+        hud: newDimensions,
+        aspectRatio: (newDimensions.width / newDimensions.height).toFixed(2)
+      })
+
+      setPreviewDimensions(newDimensions)
+    }
+
+    // 初始设置
+    updateDimensions()
+
+    // 监听窗口大小变化
+    const resizeObserver = new ResizeObserver(updateDimensions)
+    resizeObserver.observe(container)
+
+    return () => resizeObserver.disconnect()
+  }, [isFaceSettings])
+
+  // 模式切换提示
+  useEffect(() => {
+    if (modeChangeNotice) {
+      const timer = setTimeout(() => setModeChangeNotice(null), 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [modeChangeNotice])
 
   // 账户视图：登录/注册
   const [authTab, setAuthTab] = useState<"login" | "register">("login")
@@ -535,6 +688,29 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
                 <ChevronRight className="h-5 w-5" />
               </Button>
             </div>
+
+            {/* 隐藏的 FaceHUD - 在胶囊状态下保持面部捕捉功能 */}
+            {faceActive && (
+              <div className="absolute -z-10 opacity-0 pointer-events-none">
+                <FaceHUD
+                  ref={hudInlineRef}
+                  active={faceActive}
+                  width={1}
+                  height={1}
+                  mode="points"
+                  mirror={faceCfg.mirror}
+                  position="custom"
+                  draggable={false}
+                  resolution={faceCfg.resolution}
+                  maxFps={faceCfg.faceFps}
+                  onStreamChange={(stream) => {
+                    console.log("[LeftControlPanel] 胶囊状态下的面部捕捉流:", stream ? "活跃" : "停止")
+                    onFaceStreamChange?.(stream)
+                  }}
+                  className="w-1 h-1"
+                />
+              </div>
+            )}
           </div>
         ) : (
           // 展开态内容
@@ -827,6 +1003,29 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
                   </div>
                 </div>
 
+                {/* 隐藏的 FaceHUD - 在详细设置页面保持面部捕捉功能 */}
+                {faceActive && (
+                  <div className="absolute -z-10 opacity-0 pointer-events-none">
+                    <FaceHUD
+                      ref={hudInlineRef}
+                      active={faceActive}
+                      width={1}
+                      height={1}
+                      mode="points"
+                      mirror={faceCfg.mirror}
+                      position="custom"
+                      draggable={false}
+                      resolution={faceCfg.resolution}
+                      maxFps={faceCfg.faceFps}
+                      onStreamChange={(stream) => {
+                        console.log("[LeftControlPanel] 详细设置页面的面部捕捉流:", stream ? "活跃" : "停止")
+                        onFaceStreamChange?.(stream)
+                      }}
+                      className="w-1 h-1"
+                    />
+                  </div>
+                )}
+
                 <div className="px-4 py-3 flex-1 overflow-y-auto space-y-4">
                   <Card>
                     <CardHeader>
@@ -902,17 +1101,19 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-sm">HUD 预览与外观</CardTitle>
-                      <CardDescription>设置 HUD 模式、位置、大小与拖拽</CardDescription>
+                      <CardDescription>设置 HUD 显示模式和大小</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div
-                        className="relative w-full rounded-md border bg-black/80"
+                        ref={previewContainerRef}
+                        className="relative w-full rounded-md border bg-gradient-to-br from-gray-900 to-black overflow-hidden flex items-center justify-center"
                         style={{ height: Math.max(160, faceCfg.hud.size) }}
                       >
                         <FaceHUD
                           ref={facePreviewRef}
                           active={previewOn}
-                          size={Math.max(160, faceCfg.hud.size)}
+                          width={previewDimensions.width}
+                          height={previewDimensions.height}
                           mode={faceCfg.hud.mode}
                           mirror={faceCfg.mirror}
                           position="custom"
@@ -921,62 +1122,76 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
                           resolution={faceCfg.resolution}
                           maxFps={faceCfg.faceFps}
                           smoothing={faceCfg.face.smoothing}
-                          className="inset-0"
+                          className="relative"
                         />
+                        {/* 状态覆盖层 - 绝对定位在容器上 */}
                         {!previewOn && (
-                          <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
-                            预览已关闭
+                          <div className="absolute inset-0 flex flex-col items-center justify-center text-xs text-muted-foreground bg-black/60 rounded-md">
+                            <div className="mb-2">📷 预览已关闭</div>
+                            <div className="text-center px-4">
+                              点击右上角开关开启预览<br/>
+                              查看 HUD 模式效果
+                            </div>
+                          </div>
+                        )}
+                        {previewOn && (
+                          <div className="absolute top-2 left-2 px-2 py-1 bg-black/70 rounded text-xs text-white z-10">
+                            <div>
+                              {faceCfg.hud.mode === "points" && "🔵 网格点模式"}
+                              {faceCfg.hud.mode === "mask" && "🎭 灰色面具模式"}
+                              {faceCfg.hud.mode === "wireframe" && "🔗 线条框架模式"}
+                            </div>
+                            <div className="text-[10px] opacity-70 mt-1">
+                              {previewDimensions.width}×{previewDimensions.height}
+                            </div>
+                          </div>
+                        )}
+                        {modeChangeNotice && (
+                          <div className="absolute bottom-2 left-2 right-2 px-3 py-2 bg-emerald-500/90 rounded text-xs text-white text-center animate-pulse z-10">
+                            ✅ {modeChangeNotice}
                           </div>
                         )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-4">
                         <div className="space-y-2">
-                          <Label>HUD 模式</Label>
+                          <Label>HUD 显示模式</Label>
                           <Select
                             value={faceCfg.hud.mode}
-                            onValueChange={(v: "points" | "mask") =>
+                            onValueChange={(v: "points" | "mask" | "wireframe") => {
+                              console.log("[LeftControlPanel] HUD 模式切换:", v)
                               updateFaceCfg({ hud: { ...faceCfg.hud, mode: v } })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="points">网格点</SelectItem>
-                              <SelectItem value="mask">灰色面具</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>HUD 位置</Label>
-                          <Select
-                            value={faceCfg.hud.position}
-                            onValueChange={(v: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "custom") =>
-                              updateFaceCfg({ hud: { ...faceCfg.hud, position: v } })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="top-left">左上</SelectItem>
-                              <SelectItem value="top-right">右上</SelectItem>
-                              <SelectItem value="bottom-left">左下</SelectItem>
-                              <SelectItem value="bottom-right">右下</SelectItem>
-                              <SelectItem value="custom">自定义拖拽</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
 
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="hudDrag">HUD 可拖拽</Label>
-                        <Switch
-                          id="hudDrag"
-                          checked={faceCfg.hud.draggable}
-                          onCheckedChange={(v) => updateFaceCfg({ hud: { ...faceCfg.hud, draggable: v } })}
-                        />
+                              // 显示切换提示
+                              const modeNames = {
+                                points: "网格点模式",
+                                mask: "灰色面具模式",
+                                wireframe: "线条框架模式"
+                              }
+                              setModeChangeNotice(`已切换到 ${modeNames[v]}`)
+                            }}
+                          >
+                            <SelectTrigger
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                            >
+                              <SelectItem value="points" onClick={(e) => e.stopPropagation()}>网格点</SelectItem>
+                              <SelectItem value="mask" onClick={(e) => e.stopPropagation()}>灰色面具</SelectItem>
+                              <SelectItem value="wireframe" onClick={(e) => e.stopPropagation()}>线条框架</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <div className="text-xs text-muted-foreground">
+                            {faceCfg.hud.mode === "points" && "显示面部关键点，性能最佳"}
+                            {faceCfg.hud.mode === "mask" && "显示面部轮廓填充，直观清晰"}
+                            {faceCfg.hud.mode === "wireframe" && "显示面部线条框架，专业效果"}
+                          </div>
+                        </div>
                       </div>
 
                       <div className="space-y-2">
@@ -1047,50 +1262,6 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
                           }
                         />
                       </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label>眨眼强度</Label>
-                          <span className="text-xs text-muted-foreground">
-                            {faceCfg.face.eye.blinkStrength.toFixed(2)}
-                          </span>
-                        </div>
-                        <Slider
-                          min={0}
-                          max={2}
-                          step={0.01}
-                          value={[faceCfg.face.eye.blinkStrength]}
-                          onValueChange={([v]) =>
-                            updateFaceCfg({
-                              face: {
-                                ...faceCfg.face,
-                                eye: { ...faceCfg.face.eye, blinkStrength: v ?? faceCfg.face.eye.blinkStrength },
-                              },
-                            })
-                          }
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label>眨眼平滑</Label>
-                          <span className="text-xs text-muted-foreground">
-                            {faceCfg.face.eye.blinkSmoothing.toFixed(2)}
-                          </span>
-                        </div>
-                        <Slider
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          value={[faceCfg.face.eye.blinkSmoothing]}
-                          onValueChange={([v]) =>
-                            updateFaceCfg({
-                              face: {
-                                ...faceCfg.face,
-                                eye: { ...faceCfg.face.eye, blinkSmoothing: v ?? faceCfg.face.eye.blinkSmoothing },
-                              },
-                            })
-                          }
-                        />
-                      </div>
                       <div className="flex items-center justify-between">
                         <Label htmlFor="mouthEnable">启用嘴部</Label>
                         <Switch
@@ -1101,61 +1272,154 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
                           }
                         />
                       </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label>张口平滑</Label>
-                          <span className="text-xs text-muted-foreground">
-                            {faceCfg.face.mouth.openSmoothing.toFixed(2)}
-                          </span>
-                        </div>
-                        <Slider
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          value={[faceCfg.face.mouth.openSmoothing]}
-                          onValueChange={([v]) =>
-                            updateFaceCfg({
-                              face: {
-                                ...faceCfg.face,
-                                mouth: {
-                                  ...faceCfg.face,
-                                  mouth: {
-                                    ...faceCfg.face.mouth,
-                                    openSmoothing: v ?? faceCfg.face.mouth.openSmoothing,
-                                  },
-                                }.mouth,
-                              },
-                            })
-                          }
-                        />
-                      </div>
 
-                      {/* 新增：Kalidokit 高级参数 */}
+
+                      {/* 新增：多层平滑控制 */}
                       <div className="pt-4 border-t">
-                        <h4 className="text-sm font-medium mb-3">Kalidokit 高级参数</h4>
+                        <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                          <span>多层平滑控制</span>
+                          <Badge variant="outline">高级</Badge>
+                        </h4>
                         <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <Label htmlFor="smoothBlink">平滑眨眼</Label>
-                            <Switch id="smoothBlink" checked={true} disabled />
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <Label htmlFor="enableWink">眨眼检测</Label>
-                            <Switch id="enableWink" checked={true} disabled />
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <Label>眼部原始平滑</Label>
+                              <span className="text-xs text-muted-foreground">{faceCfg.smoothing?.eyeRaw?.toFixed(2) || "0.70"}</span>
+                            </div>
+                            <Slider
+                              min={0.1}
+                              max={1}
+                              step={0.05}
+                              value={[faceCfg.smoothing?.eyeRaw || 0.7]}
+                              onValueChange={([v]) =>
+                                updateFaceCfg({ smoothing: { ...faceCfg.smoothing, eyeRaw: v ?? (faceCfg.smoothing?.eyeRaw || 0.7) } })
+                              }
+                            />
                           </div>
                           <div className="space-y-2">
                             <div className="flex items-center justify-between">
-                              <Label>头部旋转限制</Label>
-                              <span className="text-xs text-muted-foreground">30°</span>
+                              <Label>眼部最终平滑</Label>
+                              <span className="text-xs text-muted-foreground">{faceCfg.smoothing?.eyeFinal?.toFixed(2) || "0.20"}</span>
                             </div>
                             <Slider
-                              min={10}
-                              max={60}
-                              step={5}
-                              value={[30]}
-                              disabled
+                              min={0.1}
+                              max={0.8}
+                              step={0.05}
+                              value={[faceCfg.smoothing?.eyeFinal || 0.2]}
+                              onValueChange={([v]) =>
+                                updateFaceCfg({ smoothing: { ...faceCfg.smoothing, eyeFinal: v ?? (faceCfg.smoothing?.eyeFinal || 0.2) } })
+                              }
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <Label>嘴部原始平滑</Label>
+                              <span className="text-xs text-muted-foreground">{faceCfg.smoothing?.mouthRaw?.toFixed(2) || "0.50"}</span>
+                            </div>
+                            <Slider
+                              min={0.1}
+                              max={1}
+                              step={0.05}
+                              value={[faceCfg.smoothing?.mouthRaw || 0.5]}
+                              onValueChange={([v]) =>
+                                updateFaceCfg({ smoothing: { ...faceCfg.smoothing, mouthRaw: v ?? (faceCfg.smoothing?.mouthRaw || 0.5) } })
+                              }
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <Label>嘴部最终平滑</Label>
+                              <span className="text-xs text-muted-foreground">{faceCfg.smoothing?.mouthFinal?.toFixed(2) || "0.30"}</span>
+                            </div>
+                            <Slider
+                              min={0.1}
+                              max={0.8}
+                              step={0.05}
+                              value={[faceCfg.smoothing?.mouthFinal || 0.3]}
+                              onValueChange={([v]) =>
+                                updateFaceCfg({ smoothing: { ...faceCfg.smoothing, mouthFinal: v ?? (faceCfg.smoothing?.mouthFinal || 0.3) } })
+                              }
                             />
                           </div>
                         </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm">微笑检测设置</CardTitle>
+                      <CardDescription>控制微笑检测的敏感度和放大效果</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="smileEnable">启用微笑检测</Label>
+                        <Switch
+                          id="smileEnable"
+                          checked={faceCfg.smile?.enable ?? true}
+                          onCheckedChange={(v) =>
+                            updateFaceCfg({ smile: { ...faceCfg.smile, enable: v } })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label>微笑敏感度</Label>
+                          <span className="text-xs text-muted-foreground">{faceCfg.smile?.sensitivity?.toFixed(3) || "0.030"}</span>
+                        </div>
+                        <Slider
+                          min={0.01}
+                          max={0.1}
+                          step={0.005}
+                          value={[faceCfg.smile?.sensitivity || 0.03]}
+                          onValueChange={([v]) =>
+                            updateFaceCfg({ smile: { ...faceCfg.smile, sensitivity: v ?? (faceCfg.smile?.sensitivity || 0.03) } })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label>微笑放大倍数</Label>
+                          <span className="text-xs text-muted-foreground">{faceCfg.smile?.amplification?.toFixed(1) || "3.2"}x</span>
+                        </div>
+                        <Slider
+                          min={1.0}
+                          max={5.0}
+                          step={0.1}
+                          value={[faceCfg.smile?.amplification || 3.2]}
+                          onValueChange={([v]) =>
+                            updateFaceCfg({ smile: { ...faceCfg.smile, amplification: v ?? (faceCfg.smile?.amplification || 3.2) } })
+                          }
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm">调试选项</CardTitle>
+                      <CardDescription>开发和调试相关的选项</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="showLandmarks">显示关键点</Label>
+                        <Switch
+                          id="showLandmarks"
+                          checked={faceCfg.debug?.showLandmarks ?? true}
+                          onCheckedChange={(v) =>
+                            updateFaceCfg({ debug: { ...faceCfg.debug, showLandmarks: v } })
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="showSmileDebug">微笑调试信息</Label>
+                        <Switch
+                          id="showSmileDebug"
+                          checked={faceCfg.debug?.showSmileDebug ?? false}
+                          onCheckedChange={(v) =>
+                            updateFaceCfg({ debug: { ...faceCfg.debug, showSmileDebug: v } })
+                          }
+                        />
                       </div>
                     </CardContent>
                   </Card>
@@ -1568,8 +1832,8 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
                           active={faceActive}
                           width={238}
                           height={previewSize}
-                          mode="points"
-                          mirror={true}
+                          mode={faceCfg.hud.mode} // 使用配置中的模式
+                          mirror={faceCfg.mirror} // 使用配置中的镜像设置
                           position="custom"
                           draggable={false}
                           resolution={faceCfg.resolution}

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { createFacePipeline, createPosePipeline } from "@/lib/tracking/pipeline"
+import { useLocalStorage } from "@/hooks/use-local-storage"
 
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -34,6 +35,9 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
     faceMaxFps: tuning?.faceMaxFps ?? 24,
     poseMaxFps: tuning?.poseMaxFps ?? 15,
   }
+
+  // 读取详细设置配置 - 与 LeftControlPanel 保持同步
+  const [faceSettings] = useLocalStorage<any>("studio.faceSettings", null)
   const containerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const guidesRef = useRef<HTMLCanvasElement>(null)
@@ -63,6 +67,17 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
   // 保存历史值用于平滑，像 Kalidokit 示例
   const oldLookTargetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   const prevEyeStateRef = useRef<{ l: number; r: number }>({ l: 1, r: 1 })
+
+  // 嘴形平滑历史值 - 像 Kalidokit 示例
+  const prevMouthStateRef = useRef<{
+    openY: number;
+    form: number;
+    rawOpenY: number;
+    rawForm: number;
+  }>({ openY: 0, form: 0, rawOpenY: 0, rawForm: 0 })
+
+  // 眨眼平滑历史值 - 增强版
+  const prevEyeRawStateRef = useRef<{ l: number; r: number }>({ l: 1, r: 1 })
 
   // 性能优化：缓存参数值，减少重复查询
   const paramCacheRef = useRef<{ [key: string]: number }>({})
@@ -214,14 +229,15 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
               const face = latestFaceRef.current
               if (!face) return
 
-              // 调试：每 10 秒输出一次 Kalidokit 数据结构，包含微笑信息
-              if (Math.random() < 0.001) { // 大约每 1000 帧输出一次
+              // 调试：Kalidokit 数据结构输出 - 受详细设置控制
+              const showSmileDebug = faceSettings?.debug?.showSmileDebug ?? false
+              if (showSmileDebug && Math.random() < 0.001) { // 大约每 1000 帧输出一次，受设置控制
                 const mouthI = face.mouth?.shape?.I || 0
                 const mouthX = face.mouth?.x || 0
                 const mouthY = face.mouth?.y || 0
                 const smileStrength = Math.max(0, mouthI * 0.8 + Math.max(0, mouthX) * 0.2)
 
-                console.log("[DemoLive2D] Kalidokit Face data structure:", {
+                console.log("[DemoLive2D] 📊 Kalidokit Face data structure:", {
                   eye: face.eye,
                   mouth: face.mouth,
                   head: face.head,
@@ -233,8 +249,16 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
                     mouthX: mouthX,
                     mouthY: mouthY,
                     calculatedSmileStrength: smileStrength,
-                    // 移除 getParam 调用，避免作用域错误
-                    rawMouthShape: face.mouth?.shape
+                    rawMouthShape: face.mouth?.shape,
+                    // 显示当前配置
+                    currentConfig: {
+                      sensitivity: faceSettings?.smile?.sensitivity ?? 0.03,
+                      amplification: faceSettings?.smile?.amplification ?? 3.2,
+                      smoothing: {
+                        mouthRaw: faceSettings?.smoothing?.mouthRaw ?? 0.5,
+                        mouthFinal: faceSettings?.smoothing?.mouthFinal ?? 0.3
+                      }
+                    }
                   },
                   pose: latestPoseRef.current ? Object.keys(latestPoseRef.current) : null,
                   hands: latestHandsRef.current ? latestHandsRef.current.map((h: any) => h ? Object.keys(h) : null) : null
@@ -320,19 +344,28 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
                   }
                 }
 
-                // 眨眼处理 - 完全按照 live2d-stage.tsx 的 blendParam 方式
+                // 眨眼处理 - Kalidokit 风格的多层平滑
                 if (face.eye) {
-                  // 使用与 live2d-stage.tsx 相同的逻辑
-                  const eyeL = clamp(face.eye.l ?? 1, 0, 1)
-                  const eyeR = clamp(face.eye.r ?? 1, 0, 1)
+                  const prevEyeRaw = prevEyeRawStateRef.current
 
-                  // 实现 blendParam 的逻辑：lerp(current, target, damp)
+                  // 原始眨眼数据
+                  const rawEyeL = clamp(face.eye.l ?? 1, 0, 1)
+                  const rawEyeR = clamp(face.eye.r ?? 1, 0, 1)
+
+                  // 第一层：原始数据平滑（使用详细设置配置）
+                  const eyeRawSmooth = faceSettings?.smoothing?.eyeRaw ?? 0.7
+                  const smoothedRawL = lerp(prevEyeRaw.l, rawEyeL, eyeRawSmooth)
+                  const smoothedRawR = lerp(prevEyeRaw.r, rawEyeR, eyeRawSmooth)
+                  prevEyeRaw.l = smoothedRawL
+                  prevEyeRaw.r = smoothedRawR
+
+                  // 第二层：最终应用层平滑（使用详细设置配置）
+                  const eyeFinalSmooth = faceSettings?.smoothing?.eyeFinal ?? 0.2
                   const currentL = getParam("ParamEyeLOpen")
                   const currentR = getParam("ParamEyeROpen")
 
-                  // 正确的插值顺序：从当前值向目标值插值
-                  setParam("ParamEyeLOpen", lerp(currentL, eyeL, 0.3))
-                  setParam("ParamEyeROpen", lerp(currentR, eyeR, 0.3))
+                  setParam("ParamEyeLOpen", lerp(currentL, smoothedRawL, eyeFinalSmooth))
+                  setParam("ParamEyeROpen", lerp(currentR, smoothedRawR, eyeFinalSmooth))
 
                   // 眼部微笑处理 - 与嘴部微笑联动
                   let smileStrength = 0
@@ -362,8 +395,9 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
                     smileStrength = Math.min(1, smileStrength * 2.2) // 从1.5倍增加到2.2倍
                   }
 
-                  // 应用眼部微笑参数 - 更敏感的阈值
-                  if (smileStrength > 0.03) { // 进一步降低阈值
+                  // 应用眼部微笑参数 - 使用详细设置的敏感度
+                  const smileSensitivity = faceSettings?.smile?.sensitivity ?? 0.03
+                  if (smileStrength > smileSensitivity) {
                     const eyeSmile = clamp(smileStrength, 0, 1)
                     const currentSmileL = getParam("ParamEyeLSmile")
                     const currentSmileR = getParam("ParamEyeRSmile")
@@ -380,15 +414,25 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
                   }
                 }
 
-                // 嘴部处理 - 改进的微笑检测
+                // 嘴部处理 - Kalidokit 风格的多层平滑
                 if (face.mouth) {
-                  // 基础张口 - 使用 live2d-stage.tsx 的逻辑
-                  const mouthOpen = clamp(face.mouth.y || 0, 0, 1)
-                  const currentOpen = getParam("ParamMouthOpenY")
-                  setParam("ParamMouthOpenY", lerp(currentOpen, mouthOpen, 0.35))
+                  const prevMouth = prevMouthStateRef.current
 
-                  // 改进的嘴形变化 - 更敏感的微笑检测
-                  let mouthForm = 0
+                  // 第一层：原始数据平滑（使用详细设置配置）
+                  const rawMouthOpen = clamp(face.mouth.y || 0, 0, 1)
+                  const mouthRawSmooth = faceSettings?.smoothing?.mouthRaw ?? 0.5
+                  const smoothedRawOpen = lerp(prevMouth.rawOpenY, rawMouthOpen, mouthRawSmooth)
+                  prevMouth.rawOpenY = smoothedRawOpen
+
+                  // 第二层：应用层平滑（使用详细设置配置）
+                  const mouthFinalSmooth = faceSettings?.smoothing?.mouthFinal ?? 0.3
+                  const currentOpen = getParam("ParamMouthOpenY")
+                  const finalOpen = lerp(currentOpen, smoothedRawOpen, mouthFinalSmooth)
+                  setParam("ParamMouthOpenY", finalOpen)
+                  prevMouth.openY = finalOpen
+
+                  // 嘴形变化 - Kalidokit 风格的多层平滑处理
+                  let rawMouthForm = 0
 
                   if (face.mouth.shape) {
                     // 方法1：使用 I - U（原有方式）- 增强权重
@@ -400,59 +444,72 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
                     const directForm = face.mouth.x || 0
 
                     // 方法3：检测微笑特征（I 音素高 + 轻微张口）- 增强
-                    const smileIndicator = mouthI > 0.2 && mouthOpen > 0.03 && mouthOpen < 0.5 ? 0.5 : 0 // 降低阈值，增加强度
+                    const smileIndicator = mouthI > 0.2 && rawMouthOpen > 0.03 && rawMouthOpen < 0.5 ? 0.5 : 0
 
                     // 方法4：新增 - 任何正值都视为微笑
                     const anyPositive = Math.max(0, directForm, mouthI, shapeForm) * 0.6
 
                     // 综合计算，使用最大值而不是加权平均
-                    mouthForm = Math.max(
+                    rawMouthForm = Math.max(
                       shapeForm * 1.0,           // 提高权重
                       directForm * 1.2,          // 大幅提高权重
                       smileIndicator,            // 微笑特征检测
                       anyPositive                // 新增：任何正值检测
                     )
 
-                    // 适度放大微笑效果
-                    if (mouthForm > 0) {
-                      mouthForm = Math.min(1, mouthForm * 3.2) // 从4.0倍降到3.2倍
+                    // 使用详细设置的微笑放大倍数
+                    const smileAmplification = faceSettings?.smile?.amplification ?? 3.2
+                    if (rawMouthForm > 0) {
+                      rawMouthForm = Math.min(1, rawMouthForm * smileAmplification)
                     }
                   } else {
-                    // 如果没有 shape 数据，使用基础的 x 值并适度放大
-                    mouthForm = (face.mouth.x || 0) * 2.8 // 从3.5倍降到2.8倍
+                    // 如果没有 shape 数据，使用详细设置的放大倍数
+                    const smileAmplification = faceSettings?.smile?.amplification ?? 3.2
+                    rawMouthForm = (face.mouth.x || 0) * (smileAmplification * 0.875) // 0.875 = 2.8/3.2 的比例
                   }
 
-                  // 适度微笑增强器：温和的多级放大
-                  if (mouthForm > 0.1) {
-                    mouthForm = Math.min(1, mouthForm * 1.3) // 从1.5降到1.3，轻微微笑时放大30%
+                  // 第一层：原始嘴形数据平滑（使用详细设置配置）
+                  const smoothedRawForm = lerp(prevMouth.rawForm, rawMouthForm, mouthRawSmooth)
+                  prevMouth.rawForm = smoothedRawForm
+
+                  // 适度微笑增强器：应用到平滑后的数据
+                  let enhancedForm = smoothedRawForm
+                  if (enhancedForm > 0.1) {
+                    enhancedForm = Math.min(1, enhancedForm * 1.3)
                   }
-                  if (mouthForm > 0.3) {
-                    mouthForm = Math.min(1, mouthForm * 1.2) // 从1.4降到1.2，明显微笑时再放大20%
+                  if (enhancedForm > 0.3) {
+                    enhancedForm = Math.min(1, enhancedForm * 1.2)
                   }
-                  if (mouthForm > 0.5) {
-                    mouthForm = Math.min(1, mouthForm * 1.1) // 从1.3降到1.1，大笑时再放大10%
+                  if (enhancedForm > 0.5) {
+                    enhancedForm = Math.min(1, enhancedForm * 1.1)
                   }
 
-                  // 温和的微笑检测：如果仍然很小，但有微笑迹象，适度放大
-                  if (mouthForm > 0.01 && mouthForm < 0.2) {
-                    mouthForm = Math.min(1, mouthForm * 5.0) // 从8倍降到5倍，对微小信号适度放大
+                  // 温和的微笑检测：对微小信号适度放大
+                  if (enhancedForm > 0.01 && enhancedForm < 0.2) {
+                    enhancedForm = Math.min(1, enhancedForm * 5.0)
                   }
 
-                  mouthForm = clamp(mouthForm, -1, 1)
+                  enhancedForm = clamp(enhancedForm, -1, 1)
+
+                  // 第二层：最终应用层平滑（使用详细设置配置）
                   const currentForm = getParam("ParamMouthForm")
-                  setParam("ParamMouthForm", lerp(currentForm, mouthForm, 0.7)) // 从0.8降到0.7，稍微温和的响应
+                  const finalForm = lerp(currentForm, enhancedForm, mouthFinalSmooth)
+                  setParam("ParamMouthForm", finalForm)
+                  prevMouth.form = finalForm
 
-                  // 增强的微笑调试输出
-                  if (Math.random() < 0.02) { // 2% 概率输出，更频繁
-                    console.log("[DemoLive2D] 🙂 ENHANCED Smile debug:", {
+                  // 多层平滑调试输出 - 受详细设置控制
+                  const showSmileDebug = faceSettings?.debug?.showSmileDebug ?? false
+                  if (showSmileDebug && Math.random() < 0.02) { // 2% 概率输出，受设置控制
+                    console.log("[DemoLive2D] 🎭 SMOOTH Mouth debug:", {
                       rawMouthX: face.mouth.x,
                       rawMouthY: face.mouth.y,
-                      rawMouthI: face.mouth.shape?.I,
-                      rawMouthU: face.mouth.shape?.U,
-                      "🔥 FINAL_mouthForm": mouthForm,
-                      "📊 currentParam": currentForm,
-                      "⚡ amplification": mouthForm / Math.max(0.001, face.mouth.x || 0.001),
-                      "🎯 isSmiling": mouthForm > 0.1 ? "YES!" : "no"
+                      "🔄 smoothedRawOpen": smoothedRawOpen.toFixed(3),
+                      "🔄 smoothedRawForm": smoothedRawForm.toFixed(3),
+                      "🎯 finalOpen": finalOpen.toFixed(3),
+                      "🎯 finalForm": finalForm.toFixed(3),
+                      "📊 smoothingConfig": `Raw:${mouthRawSmooth.toFixed(2)} Final:${mouthFinalSmooth.toFixed(2)}`,
+                      "🎯 smileConfig": `Sensitivity:${smileSensitivity.toFixed(3)} Amplification:${(faceSettings?.smile?.amplification ?? 3.2).toFixed(1)}x`,
+                      "✨ isSmooth": Math.abs(finalForm - prevMouth.form) < 0.1 ? "YES" : "transitioning"
                     })
                   }
                 }
