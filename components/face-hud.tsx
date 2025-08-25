@@ -493,20 +493,15 @@ export default forwardRef(function FaceHUD(
         }
         ctx.stroke()
       }
-      // 外框细描
-      drawEdges(CONTOUR_EDGES[0], '#ffffff', 1.0)
+      // 面具上仅叠加“眉、眼、唇外环”，避免鼻部折线造成奇怪的内线
       // 眉
       drawEdges(CONTOUR_EDGES[5], '#44ff88', 1.2)
       drawEdges(CONTOUR_EDGES[6], '#44ff88', 1.2)
       // 眼
       drawEdges(CONTOUR_EDGES[1], '#00ddff', 1.0)
       drawEdges(CONTOUR_EDGES[2], '#00ddff', 1.0)
-      // 嘴
+      // 唇（仅外环）
       drawEdges(CONTOUR_EDGES[3], '#ff4466', 1.1)
-      drawEdges(CONTOUR_EDGES[4], '#ff6688', 0.9)
-      // 鼻下/鼻梁
-      drawEdges(CONTOUR_EDGES[7], '#ffdd44', 1.0)
-      if (CONTOUR_EDGES[8]) drawEdges(CONTOUR_EDGES[8], '#ffdd44', 1.0)
 
       return
     }
