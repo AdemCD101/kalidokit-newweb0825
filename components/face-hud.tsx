@@ -451,18 +451,20 @@ export default forwardRef(function FaceHUD(
                   ctx.lineJoin = 'round'
 
                   ctx.beginPath()
-                  // U 型曲线：左侧 -> 底部 -> 右侧
+                  // 真正的 U 型：左边线 -> 底部弧线 -> 右边线（不闭合）
                   const leftX = canvasCx - tongueWidth / 2
                   const rightX = canvasCx + tongueWidth / 2
                   const bottomY = tongueY + tongueLength
 
-                  // 左侧弧线
-                  ctx.moveTo(canvasCx, tongueY)
-                  ctx.quadraticCurveTo(leftX, tongueY + tongueLength * 0.3, leftX, bottomY - tongueLength * 0.2)
-                  // 底部弧线
-                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.2)
-                  // 右侧弧线
-                  ctx.quadraticCurveTo(rightX, tongueY + tongueLength * 0.3, canvasCx, tongueY)
+                  // 左边直线（从嘴部向下）
+                  ctx.moveTo(leftX, tongueY)
+                  ctx.lineTo(leftX, bottomY - tongueLength * 0.3)
+
+                  // 底部 U 型弧线
+                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.3)
+
+                  // 右边直线（向上到嘴部）
+                  ctx.lineTo(rightX, tongueY)
 
                   ctx.stroke()
 
@@ -472,7 +474,7 @@ export default forwardRef(function FaceHUD(
                     ctx.lineWidth = 1
                     ctx.beginPath()
                     ctx.moveTo(canvasCx, tongueY)
-                    ctx.lineTo(canvasCx, bottomY - tongueLength * 0.1)
+                    ctx.lineTo(canvasCx, bottomY - tongueLength * 0.15)
                     ctx.stroke()
                   }
                 }
@@ -590,15 +592,16 @@ export default forwardRef(function FaceHUD(
                   ctx.beginPath()
                   const leftX = canvasCx - tongueWidth / 2, rightX = canvasCx + tongueWidth / 2
                   const bottomY = tongueY + tongueLength
-                  ctx.moveTo(canvasCx, tongueY)
-                  ctx.quadraticCurveTo(leftX, tongueY + tongueLength * 0.3, leftX, bottomY - tongueLength * 0.2)
-                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.2)
-                  ctx.quadraticCurveTo(rightX, tongueY + tongueLength * 0.3, canvasCx, tongueY)
+                  // 真正的 U 型：左边线 -> 底部弧线 -> 右边线
+                  ctx.moveTo(leftX, tongueY)
+                  ctx.lineTo(leftX, bottomY - tongueLength * 0.3)
+                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.3)
+                  ctx.lineTo(rightX, tongueY)
                   ctx.stroke()
 
                   if (tongueExtension > 0.4) {
                     ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.6})`; ctx.lineWidth = 1
-                    ctx.beginPath(); ctx.moveTo(canvasCx, tongueY); ctx.lineTo(canvasCx, bottomY - tongueLength * 0.1); ctx.stroke()
+                    ctx.beginPath(); ctx.moveTo(canvasCx, tongueY); ctx.lineTo(canvasCx, bottomY - tongueLength * 0.15); ctx.stroke()
                   }
                 }
               }
@@ -784,15 +787,16 @@ export default forwardRef(function FaceHUD(
                   ctx.beginPath()
                   const leftX = canvasCx - tongueWidth / 2, rightX = canvasCx + tongueWidth / 2
                   const bottomY = tongueY + tongueLength
-                  ctx.moveTo(canvasCx, tongueY)
-                  ctx.quadraticCurveTo(leftX, tongueY + tongueLength * 0.3, leftX, bottomY - tongueLength * 0.2)
-                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.2)
-                  ctx.quadraticCurveTo(rightX, tongueY + tongueLength * 0.3, canvasCx, tongueY)
+                  // 真正的 U 型：左边线 -> 底部弧线 -> 右边线
+                  ctx.moveTo(leftX, tongueY)
+                  ctx.lineTo(leftX, bottomY - tongueLength * 0.3)
+                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.3)
+                  ctx.lineTo(rightX, tongueY)
                   ctx.stroke()
 
                   if (tongueExtension > 0.4) {
                     ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.6})`; ctx.lineWidth = 1
-                    ctx.beginPath(); ctx.moveTo(canvasCx, tongueY); ctx.lineTo(canvasCx, bottomY - tongueLength * 0.1); ctx.stroke()
+                    ctx.beginPath(); ctx.moveTo(canvasCx, tongueY); ctx.lineTo(canvasCx, bottomY - tongueLength * 0.15); ctx.stroke()
                   }
                 }
               }
