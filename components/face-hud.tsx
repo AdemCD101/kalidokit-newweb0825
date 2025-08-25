@@ -427,55 +427,33 @@ export default forwardRef(function FaceHUD(
                 }
 
                 const redRatio = redPixels / totalPixels
-                if (redRatio > 0.08) { // 降低阈值，更容易检测到
-                  // 根据舌头伸出程度调整显示
-                  const canvasCx = cx * (w / vw)
-                  const canvasCy = cy * (h / vh)
-
-                  // 舌头伸出程度：基于红色像素的最大Y位置和开口程度
+                if (redRatio > 0.08) { // 舌头检测成功
+                  // 计算舌头伸出程度和开口程度（用于后续模型应用）
                   const tongueExtension = Math.max(0, (maxRedY / sampleSize - 0.5) * 2) // 0-1范围
                   const openness = Math.max(jawOpen, mouthOpen) // 开口程度
 
-                  // 舌头位置：随伸出程度向下移动
-                  const tongueY = canvasCy + (tongueExtension * openness * h * 0.04)
+                  // 将舌头检测结果存储到全局状态（供其他模型使用）
+                  // 可以通过 window 对象或事件系统传递给其他组件
+                  if (typeof window !== 'undefined') {
+                    window.tongueDetection = {
+                      detected: true,
+                      extension: tongueExtension,
+                      openness: openness,
+                      timestamp: Date.now()
+                    }
+                  }
 
-                  // 舌头大小：随伸出程度和开口程度变化
-                  const tongueWidth = w * 0.025 * (1 + tongueExtension * 0.6)
-                  const tongueLength = h * 0.02 * (1 + tongueExtension * 1.5 + openness * 0.8)
-
-                  // 绘制 U 型舌头轮廓
-                  const alpha = 0.8 + tongueExtension * 0.2
-                  ctx.strokeStyle = `rgba(255,105,180,${alpha})`
-                  ctx.lineWidth = 2 + tongueExtension * 1.5
-                  ctx.lineCap = 'round'
-                  ctx.lineJoin = 'round'
-
-                  ctx.beginPath()
-                  // 真正的 U 型：左边线 -> 底部弧线 -> 右边线（不闭合）
-                  const leftX = canvasCx - tongueWidth / 2
-                  const rightX = canvasCx + tongueWidth / 2
-                  const bottomY = tongueY + tongueLength
-
-                  // 左边直线（从嘴部向下）
-                  ctx.moveTo(leftX, tongueY)
-                  ctx.lineTo(leftX, bottomY - tongueLength * 0.3)
-
-                  // 底部 U 型弧线
-                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.3)
-
-                  // 右边直线（向上到嘴部）
-                  ctx.lineTo(rightX, tongueY)
-
-                  ctx.stroke()
-
-                  // 如果舌头明显伸出，添加舌头中线
-                  if (tongueExtension > 0.4) {
-                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.6})`
-                    ctx.lineWidth = 1
-                    ctx.beginPath()
-                    ctx.moveTo(canvasCx, tongueY)
-                    ctx.lineTo(canvasCx, bottomY - tongueLength * 0.15)
-                    ctx.stroke()
+                  // 不再绘制舌头可视化，但保持检测逻辑
+                  // console.log('Tongue detected:', { extension: tongueExtension, openness })
+                } else {
+                  // 未检测到舌头时清除状态
+                  if (typeof window !== 'undefined') {
+                    window.tongueDetection = {
+                      detected: false,
+                      extension: 0,
+                      openness: Math.max(jawOpen, mouthOpen),
+                      timestamp: Date.now()
+                    }
                   }
                 }
               }
@@ -576,32 +554,28 @@ export default forwardRef(function FaceHUD(
 
                 const redRatio = redPixels / totalPixels
                 if (redRatio > 0.08) {
-                  const canvasCx = cx * (w / vw), canvasCy = cy * (h / vh)
                   const tongueExtension = Math.max(0, (maxRedY / sampleSize - 0.5) * 2)
                   const openness = Math.max(jawOpen, mouthOpen)
-                  const tongueY = canvasCy + (tongueExtension * openness * h * 0.04)
-                  const tongueWidth = w * 0.025 * (1 + tongueExtension * 0.6)
-                  const tongueLength = h * 0.02 * (1 + tongueExtension * 1.5 + openness * 0.8)
-                  const alpha = 0.8 + tongueExtension * 0.2
 
-                  // 绘制 U 型舌头轮廓（线框模式）
-                  ctx.strokeStyle = `rgba(255,105,180,${alpha})`
-                  ctx.lineWidth = 2 + tongueExtension * 1.5
-                  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
-
-                  ctx.beginPath()
-                  const leftX = canvasCx - tongueWidth / 2, rightX = canvasCx + tongueWidth / 2
-                  const bottomY = tongueY + tongueLength
-                  // 真正的 U 型：左边线 -> 底部弧线 -> 右边线
-                  ctx.moveTo(leftX, tongueY)
-                  ctx.lineTo(leftX, bottomY - tongueLength * 0.3)
-                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.3)
-                  ctx.lineTo(rightX, tongueY)
-                  ctx.stroke()
-
-                  if (tongueExtension > 0.4) {
-                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.6})`; ctx.lineWidth = 1
-                    ctx.beginPath(); ctx.moveTo(canvasCx, tongueY); ctx.lineTo(canvasCx, bottomY - tongueLength * 0.15); ctx.stroke()
+                  // 存储舌头检测结果供其他模型使用
+                  if (typeof window !== 'undefined') {
+                    window.tongueDetection = {
+                      detected: true,
+                      extension: tongueExtension,
+                      openness: openness,
+                      timestamp: Date.now()
+                    }
+                  }
+                  // 不绘制舌头可视化
+                } else {
+                  // 未检测到舌头时清除状态
+                  if (typeof window !== 'undefined') {
+                    window.tongueDetection = {
+                      detected: false,
+                      extension: 0,
+                      openness: Math.max(jawOpen, mouthOpen),
+                      timestamp: Date.now()
+                    }
                   }
                 }
               }
@@ -771,32 +745,28 @@ export default forwardRef(function FaceHUD(
 
                 const redRatio = redPixels / totalPixels
                 if (redRatio > 0.08) {
-                  const canvasCx = cx * (w / vw), canvasCy = cy * (h / vh)
                   const tongueExtension = Math.max(0, (maxRedY / sampleSize - 0.5) * 2)
                   const openness = Math.max(jawOpen, mouthOpen)
-                  const tongueY = canvasCy + (tongueExtension * openness * h * 0.04)
-                  const tongueWidth = w * 0.025 * (1 + tongueExtension * 0.6)
-                  const tongueLength = h * 0.02 * (1 + tongueExtension * 1.5 + openness * 0.8)
-                  const alpha = 0.8 + tongueExtension * 0.2
 
-                  // 绘制 U 型舌头轮廓（面具模式）
-                  ctx.strokeStyle = `rgba(255,105,180,${alpha})`
-                  ctx.lineWidth = 2 + tongueExtension * 1.5
-                  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
-
-                  ctx.beginPath()
-                  const leftX = canvasCx - tongueWidth / 2, rightX = canvasCx + tongueWidth / 2
-                  const bottomY = tongueY + tongueLength
-                  // 真正的 U 型：左边线 -> 底部弧线 -> 右边线
-                  ctx.moveTo(leftX, tongueY)
-                  ctx.lineTo(leftX, bottomY - tongueLength * 0.3)
-                  ctx.quadraticCurveTo(canvasCx, bottomY, rightX, bottomY - tongueLength * 0.3)
-                  ctx.lineTo(rightX, tongueY)
-                  ctx.stroke()
-
-                  if (tongueExtension > 0.4) {
-                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.6})`; ctx.lineWidth = 1
-                    ctx.beginPath(); ctx.moveTo(canvasCx, tongueY); ctx.lineTo(canvasCx, bottomY - tongueLength * 0.15); ctx.stroke()
+                  // 存储舌头检测结果供其他模型使用
+                  if (typeof window !== 'undefined') {
+                    window.tongueDetection = {
+                      detected: true,
+                      extension: tongueExtension,
+                      openness: openness,
+                      timestamp: Date.now()
+                    }
+                  }
+                  // 不绘制舌头可视化
+                } else {
+                  // 未检测到舌头时清除状态
+                  if (typeof window !== 'undefined') {
+                    window.tongueDetection = {
+                      detected: false,
+                      extension: 0,
+                      openness: Math.max(jawOpen, mouthOpen),
+                      timestamp: Date.now()
+                    }
                   }
                 }
               }
