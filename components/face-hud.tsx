@@ -385,43 +385,79 @@ export default forwardRef(function FaceHUD(
           const mouthOpen = blendshapes.find((b: any) => b.categoryName === 'mouthOpen')?.score || 0
 
           // 嘴部需要有一定开合度才可能看到舌头
-          if (jawOpen > 0.15 || mouthOpen > 0.1) {
+          if (jawOpen > 0.1 || mouthOpen > 0.05) {
             const mouth = LIPS_INNER.length ? LIPS_INNER : LIPS_OUTER
             const mx = mouth.map(i => videoPts[i]).filter(Boolean) as number[][]
             if (mx.length >= 3) {
-              // 计算内唇中心
-              let sx = 0, sy = 0
-              for (const p of mx) { sx += p[0]; sy += p[1] }
-              const cx = sx / mx.length, cy = sy / mx.length
+              // 计算内唇中心和下唇位置
+              let sx = 0, sy = 0, bottomY = -Infinity
+              for (const p of mx) {
+                sx += p[0]; sy += p[1]
+                bottomY = Math.max(bottomY, p[1]) // 找到最下方的唇点
+              }
+              const cx = sx / mx.length
+              const cy = sy / mx.length
 
-              // 采样 32x32 区域进行颜色检测
+              // 采样区域扩大到嘴部下方，检测舌头伸出程度
+              const sampleSize = 48
               const sCanvas = sampleCanvasRef.current || (sampleCanvasRef.current = document.createElement('canvas'))
               const sctx = sCanvas.getContext('2d')
               const video = videoRef.current!
-              sCanvas.width = 32; sCanvas.height = 32
+              sCanvas.width = sampleSize; sCanvas.height = sampleSize
               if (sctx) {
-                sctx.drawImage(video, cx - 16, cy - 16, 32, 32, 0, 0, 32, 32)
-                const img = sctx.getImageData(0, 0, 32, 32).data
+                // 采样区域向下偏移，覆盖舌头可能伸出的区域
+                const offsetY = 8 // 向下偏移
+                sctx.drawImage(video, cx - sampleSize/2, cy - sampleSize/2 + offsetY, sampleSize, sampleSize, 0, 0, sampleSize, sampleSize)
+                const img = sctx.getImageData(0, 0, sampleSize, sampleSize).data
 
                 let redPixels = 0, totalPixels = 0
-                for (let i = 0; i < img.length; i += 4) {
-                  const r = img[i], g = img[i + 1], b = img[i + 2]
-                  // 改进的红色检测：高红色值且饱和度足够
-                  if (r > 120 && r > g + 20 && r > b + 20 && (r - Math.max(g, b)) > 30) {
-                    redPixels++
+                let maxRedY = 0 // 记录红色像素的最大Y位置（舌头伸出程度）
+
+                for (let y = 0; y < sampleSize; y++) {
+                  for (let x = 0; x < sampleSize; x++) {
+                    const i = (y * sampleSize + x) * 4
+                    const r = img[i], g = img[i + 1], b = img[i + 2]
+                    // 舌头红色检测
+                    if (r > 110 && r > g + 15 && r > b + 15 && (r - Math.max(g, b)) > 25) {
+                      redPixels++
+                      maxRedY = Math.max(maxRedY, y)
+                    }
+                    totalPixels++
                   }
-                  totalPixels++
                 }
 
                 const redRatio = redPixels / totalPixels
-                if (redRatio > 0.12) { // 12% 以上红色像素认为有舌头
-                  // 绘制舌头标记（转换到画布坐标）
+                if (redRatio > 0.08) { // 降低阈值，更容易检测到
+                  // 根据舌头伸出程度调整显示
                   const canvasCx = cx * (w / vw)
                   const canvasCy = cy * (h / vh)
-                  ctx.fillStyle = 'rgba(255,105,180,0.8)'
+
+                  // 舌头伸出程度：基于红色像素的最大Y位置和开口程度
+                  const tongueExtension = Math.max(0, (maxRedY / sampleSize - 0.5) * 2) // 0-1范围
+                  const openness = Math.max(jawOpen, mouthOpen) // 开口程度
+
+                  // 舌头位置：随伸出程度向下移动
+                  const tongueY = canvasCy + (tongueExtension * openness * h * 0.04)
+
+                  // 舌头大小：随伸出程度和开口程度变化
+                  const baseWidth = w * 0.02
+                  const baseHeight = h * 0.012
+                  const tongueWidth = baseWidth * (1 + tongueExtension * 0.8)
+                  const tongueHeight = baseHeight * (1 + tongueExtension * 1.2 + openness * 0.5)
+
+                  // 绘制舌头（椭圆形，颜色随伸出程度变化）
+                  const alpha = 0.7 + tongueExtension * 0.2
+                  ctx.fillStyle = `rgba(255,105,180,${alpha})`
                   ctx.beginPath()
-                  ctx.ellipse(canvasCx, canvasCy, w * 0.025, h * 0.015, 0, 0, Math.PI * 2)
+                  ctx.ellipse(canvasCx, tongueY, tongueWidth, tongueHeight, 0, 0, Math.PI * 2)
                   ctx.fill()
+
+                  // 如果舌头明显伸出，添加舌头轮廓
+                  if (tongueExtension > 0.3) {
+                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.8})`
+                    ctx.lineWidth = 1
+                    ctx.stroke()
+                  }
                 }
               }
             }
@@ -480,45 +516,64 @@ export default forwardRef(function FaceHUD(
         }
       }
 
-      // 舌头检测与显示（线框模式）
+      // 舌头检测与显示（线框模式）- 使用相同的动态检测逻辑
       try {
         if (blendshapes && videoPts && vw && vh) {
           const jawOpen = blendshapes.find((b: any) => b.categoryName === 'jawOpen')?.score || 0
           const mouthOpen = blendshapes.find((b: any) => b.categoryName === 'mouthOpen')?.score || 0
 
-          if (jawOpen > 0.15 || mouthOpen > 0.1) {
+          if (jawOpen > 0.1 || mouthOpen > 0.05) {
             const mouth = LIPS_INNER.length ? LIPS_INNER : LIPS_OUTER
             const mx = mouth.map(i => videoPts[i]).filter(Boolean) as number[][]
             if (mx.length >= 3) {
-              let sx = 0, sy = 0
-              for (const p of mx) { sx += p[0]; sy += p[1] }
+              let sx = 0, sy = 0, bottomY = -Infinity
+              for (const p of mx) {
+                sx += p[0]; sy += p[1]
+                bottomY = Math.max(bottomY, p[1])
+              }
               const cx = sx / mx.length, cy = sy / mx.length
 
+              const sampleSize = 48
               const sCanvas = sampleCanvasRef.current || (sampleCanvasRef.current = document.createElement('canvas'))
               const sctx = sCanvas.getContext('2d')
               const video = videoRef.current!
-              sCanvas.width = 32; sCanvas.height = 32
+              sCanvas.width = sampleSize; sCanvas.height = sampleSize
               if (sctx) {
-                sctx.drawImage(video, cx - 16, cy - 16, 32, 32, 0, 0, 32, 32)
-                const img = sctx.getImageData(0, 0, 32, 32).data
+                const offsetY = 8
+                sctx.drawImage(video, cx - sampleSize/2, cy - sampleSize/2 + offsetY, sampleSize, sampleSize, 0, 0, sampleSize, sampleSize)
+                const img = sctx.getImageData(0, 0, sampleSize, sampleSize).data
 
-                let redPixels = 0, totalPixels = 0
-                for (let i = 0; i < img.length; i += 4) {
-                  const r = img[i], g = img[i + 1], b = img[i + 2]
-                  if (r > 120 && r > g + 20 && r > b + 20 && (r - Math.max(g, b)) > 30) {
-                    redPixels++
+                let redPixels = 0, totalPixels = 0, maxRedY = 0
+                for (let y = 0; y < sampleSize; y++) {
+                  for (let x = 0; x < sampleSize; x++) {
+                    const i = (y * sampleSize + x) * 4
+                    const r = img[i], g = img[i + 1], b = img[i + 2]
+                    if (r > 110 && r > g + 15 && r > b + 15 && (r - Math.max(g, b)) > 25) {
+                      redPixels++; maxRedY = Math.max(maxRedY, y)
+                    }
+                    totalPixels++
                   }
-                  totalPixels++
                 }
 
                 const redRatio = redPixels / totalPixels
-                if (redRatio > 0.12) {
-                  const canvasCx = cx * (w / vw)
-                  const canvasCy = cy * (h / vh)
-                  ctx.fillStyle = 'rgba(255,105,180,0.8)'
+                if (redRatio > 0.08) {
+                  const canvasCx = cx * (w / vw), canvasCy = cy * (h / vh)
+                  const tongueExtension = Math.max(0, (maxRedY / sampleSize - 0.5) * 2)
+                  const openness = Math.max(jawOpen, mouthOpen)
+                  const tongueY = canvasCy + (tongueExtension * openness * h * 0.04)
+                  const tongueWidth = w * 0.02 * (1 + tongueExtension * 0.8)
+                  const tongueHeight = h * 0.012 * (1 + tongueExtension * 1.2 + openness * 0.5)
+                  const alpha = 0.7 + tongueExtension * 0.2
+
+                  ctx.fillStyle = `rgba(255,105,180,${alpha})`
                   ctx.beginPath()
-                  ctx.ellipse(canvasCx, canvasCy, w * 0.025, h * 0.015, 0, 0, Math.PI * 2)
+                  ctx.ellipse(canvasCx, tongueY, tongueWidth, tongueHeight, 0, 0, Math.PI * 2)
                   ctx.fill()
+
+                  if (tongueExtension > 0.3) {
+                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.8})`
+                    ctx.lineWidth = 1; ctx.stroke()
+                  }
                 }
               }
             }
@@ -646,45 +701,64 @@ export default forwardRef(function FaceHUD(
         }
       }
 
-      // 舌头检测与显示（面具模式）
+      // 舌头检测与显示（面具模式）- 使用相同的动态检测逻辑
       try {
         if (blendshapes && videoPts && vw && vh) {
           const jawOpen = blendshapes.find((b: any) => b.categoryName === 'jawOpen')?.score || 0
           const mouthOpen = blendshapes.find((b: any) => b.categoryName === 'mouthOpen')?.score || 0
 
-          if (jawOpen > 0.15 || mouthOpen > 0.1) {
+          if (jawOpen > 0.1 || mouthOpen > 0.05) {
             const mouth = LIPS_INNER.length ? LIPS_INNER : LIPS_OUTER
             const mx = mouth.map(i => videoPts[i]).filter(Boolean) as number[][]
             if (mx.length >= 3) {
-              let sx = 0, sy = 0
-              for (const p of mx) { sx += p[0]; sy += p[1] }
+              let sx = 0, sy = 0, bottomY = -Infinity
+              for (const p of mx) {
+                sx += p[0]; sy += p[1]
+                bottomY = Math.max(bottomY, p[1])
+              }
               const cx = sx / mx.length, cy = sy / mx.length
 
+              const sampleSize = 48
               const sCanvas = sampleCanvasRef.current || (sampleCanvasRef.current = document.createElement('canvas'))
               const sctx = sCanvas.getContext('2d')
               const video = videoRef.current!
-              sCanvas.width = 32; sCanvas.height = 32
+              sCanvas.width = sampleSize; sCanvas.height = sampleSize
               if (sctx) {
-                sctx.drawImage(video, cx - 16, cy - 16, 32, 32, 0, 0, 32, 32)
-                const img = sctx.getImageData(0, 0, 32, 32).data
+                const offsetY = 8
+                sctx.drawImage(video, cx - sampleSize/2, cy - sampleSize/2 + offsetY, sampleSize, sampleSize, 0, 0, sampleSize, sampleSize)
+                const img = sctx.getImageData(0, 0, sampleSize, sampleSize).data
 
-                let redPixels = 0, totalPixels = 0
-                for (let i = 0; i < img.length; i += 4) {
-                  const r = img[i], g = img[i + 1], b = img[i + 2]
-                  if (r > 120 && r > g + 20 && r > b + 20 && (r - Math.max(g, b)) > 30) {
-                    redPixels++
+                let redPixels = 0, totalPixels = 0, maxRedY = 0
+                for (let y = 0; y < sampleSize; y++) {
+                  for (let x = 0; x < sampleSize; x++) {
+                    const i = (y * sampleSize + x) * 4
+                    const r = img[i], g = img[i + 1], b = img[i + 2]
+                    if (r > 110 && r > g + 15 && r > b + 15 && (r - Math.max(g, b)) > 25) {
+                      redPixels++; maxRedY = Math.max(maxRedY, y)
+                    }
+                    totalPixels++
                   }
-                  totalPixels++
                 }
 
                 const redRatio = redPixels / totalPixels
-                if (redRatio > 0.12) {
-                  const canvasCx = cx * (w / vw)
-                  const canvasCy = cy * (h / vh)
-                  ctx.fillStyle = 'rgba(255,105,180,0.8)'
+                if (redRatio > 0.08) {
+                  const canvasCx = cx * (w / vw), canvasCy = cy * (h / vh)
+                  const tongueExtension = Math.max(0, (maxRedY / sampleSize - 0.5) * 2)
+                  const openness = Math.max(jawOpen, mouthOpen)
+                  const tongueY = canvasCy + (tongueExtension * openness * h * 0.04)
+                  const tongueWidth = w * 0.02 * (1 + tongueExtension * 0.8)
+                  const tongueHeight = h * 0.012 * (1 + tongueExtension * 1.2 + openness * 0.5)
+                  const alpha = 0.7 + tongueExtension * 0.2
+
+                  ctx.fillStyle = `rgba(255,105,180,${alpha})`
                   ctx.beginPath()
-                  ctx.ellipse(canvasCx, canvasCy, w * 0.025, h * 0.015, 0, 0, Math.PI * 2)
+                  ctx.ellipse(canvasCx, tongueY, tongueWidth, tongueHeight, 0, 0, Math.PI * 2)
                   ctx.fill()
+
+                  if (tongueExtension > 0.3) {
+                    ctx.strokeStyle = `rgba(220,80,150,${alpha * 0.8})`
+                    ctx.lineWidth = 1; ctx.stroke()
+                  }
                 }
               }
             }
