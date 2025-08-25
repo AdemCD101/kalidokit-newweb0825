@@ -4,7 +4,7 @@ import type React from "react"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { createFaceLandmarker, hasMediapipeSupport } from "@/lib/tracking/mediapipe"
-import { FACE_OVAL, LEFT_EYE, RIGHT_EYE, LEFT_EYEBROW, RIGHT_EYEBROW, LIPS_OUTER, LIPS_INNER, NOSE_BOTTOM } from "./face-constants"
+import { FACE_OVAL, LEFT_EYE, RIGHT_EYE, LEFT_EYEBROW, RIGHT_EYEBROW, LIPS_OUTER, LIPS_INNER, NOSE_BOTTOM, CONTOUR_EDGES } from "./face-constants"
 
 export type FaceHUDHandle = {
   start: () => Promise<void>
@@ -383,48 +383,35 @@ export default forwardRef(function FaceHUD(
     if (m === "wireframe") {
       // 线框模式 - 使用官方连接索引（loop 中已处理清屏/镜像/缩放）
 
-      // 绘制连接线的辅助函数
-      const drawConnectors = (indices: number[], color: string, lineWidth = 1) => {
-        if (indices.length < 2) return
-
+      // 统一边绘制：使用官方环/折线转换的边集合
+      const drawEdges = (edges: [number,number][], color: string, lw = 1) => {
         ctx.strokeStyle = color
-        ctx.lineWidth = lineWidth
+        ctx.lineWidth = lw
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
-
         ctx.beginPath()
-        let started = false
-        for (const idx of indices) {
-          if (points[idx]) {
-            if (!started) {
-              ctx.moveTo(points[idx][0], points[idx][1])
-              started = true
-            } else {
-              ctx.lineTo(points[idx][0], points[idx][1])
-            }
-          }
+        for (const [a,b] of edges) {
+          if (!points[a] || !points[b]) continue
+          ctx.moveTo(points[a][0], points[a][1])
+          ctx.lineTo(points[b][0], points[b][1])
         }
         ctx.stroke()
       }
 
-      // 面部外框 - 白色
-      drawConnectors([...FACEMESH_CONTOURS.faceOval, FACEMESH_CONTOURS.faceOval[0]], '#ffffff', 1.5)
-
-      // 眼睛轮廓 - 亮蓝色
-      drawConnectors([...FACEMESH_CONTOURS.leftEye, FACEMESH_CONTOURS.leftEye[0]], '#00ddff', 1.2)
-      drawConnectors([...FACEMESH_CONTOURS.rightEye, FACEMESH_CONTOURS.rightEye[0]], '#00ddff', 1.2)
-
-      // 眉毛 - 亮绿色
-      drawConnectors(FACEMESH_CONTOURS.leftEyebrow, '#44ff88', 1.5)
-      drawConnectors(FACEMESH_CONTOURS.rightEyebrow, '#44ff88', 1.5)
-
-      // 嘴巴轮廓 - 亮红色
-      drawConnectors([...FACEMESH_CONTOURS.lipsOuter, FACEMESH_CONTOURS.lipsOuter[0]], '#ff4466', 1.3)
-      drawConnectors([...FACEMESH_CONTOURS.lipsInner, FACEMESH_CONTOURS.lipsInner[0]], '#ff6688', 1)
-
-      // 鼻子轮廓 - 亮黄色
-      drawConnectors(FACEMESH_CONTOURS.noseBottom, '#ffdd44', 1.2)
-
+      // 使用预构建的轮廓边
+      // 外框：白色
+      drawEdges(CONTOUR_EDGES[0], '#ffffff', 1.5)
+      // 左/右眼：亮蓝
+      drawEdges(CONTOUR_EDGES[1], '#00ddff', 1.2)
+      drawEdges(CONTOUR_EDGES[2], '#00ddff', 1.2)
+      // 嘴唇外/内：亮红/粉
+      drawEdges(CONTOUR_EDGES[3], '#ff4466', 1.3)
+      drawEdges(CONTOUR_EDGES[4], '#ff6688', 1.0)
+      // 左/右眉：亮绿
+      drawEdges(CONTOUR_EDGES[5], '#44ff88', 1.5)
+      drawEdges(CONTOUR_EDGES[6], '#44ff88', 1.5)
+      // 鼻下与鼻梁：亮黄
+      drawEdges(CONTOUR_EDGES[7], '#ffdd44', 1.2)
       // 鼻尖点
       for (const idx of FACEMESH_CONTOURS.noseTip) {
         if (points[idx]) {
@@ -455,44 +442,32 @@ export default forwardRef(function FaceHUD(
       }
       facePath.closePath()
 
-      // 创建眼睛洞路径
-      const createEyeHole = (eyeIndices: number[]) => {
-        const eyePath = new Path2D()
-        let eyeStarted = false
-        for (const idx of eyeIndices) {
-          if (points[idx]) {
-            if (!eyeStarted) {
-              eyePath.moveTo(points[idx][0], points[idx][1])
-              eyeStarted = true
-            } else {
-              eyePath.lineTo(points[idx][0], points[idx][1])
-            }
-          }
+      // 根据索引集合构造凸包洞路径，避免依赖点序
+      const makeHullPath = (indices: number[]) => {
+        const pts: number[][] = []
+        for (const idx of indices) {
+          if (points[idx]) pts.push([points[idx][0], points[idx][1]])
         }
-        eyePath.closePath()
-        return eyePath
+        if (pts.length < 3) return new Path2D()
+        const hull = convexHull(pts) as any[]
+        const p = new Path2D()
+        if (hull.length) {
+          p.moveTo(hull[0].x, hull[0].y)
+          for (let i = 1; i < hull.length; i++) p.lineTo(hull[i].x, hull[i].y)
+          p.closePath()
+        }
+        return p
       }
 
-      // 创建嘴巴洞路径
-      const mouthPath = new Path2D()
-      let mouthStarted = false
-      for (const idx of FACEMESH_CONTOURS.lipsOuter) {
-        if (points[idx]) {
-          if (!mouthStarted) {
-            mouthPath.moveTo(points[idx][0], points[idx][1])
-            mouthStarted = true
-          } else {
-            mouthPath.lineTo(points[idx][0], points[idx][1])
-          }
-        }
-      }
-      mouthPath.closePath()
+      const leftEyeHole = makeHullPath(FACEMESH_CONTOURS.leftEye)
+      const rightEyeHole = makeHullPath(FACEMESH_CONTOURS.rightEye)
+      const mouthPath = makeHullPath(FACEMESH_CONTOURS.lipsOuter)
 
       // 合并所有路径
       const combinedPath = new Path2D()
       combinedPath.addPath(facePath)
-      combinedPath.addPath(createEyeHole(FACEMESH_CONTOURS.leftEye))
-      combinedPath.addPath(createEyeHole(FACEMESH_CONTOURS.rightEye))
+      combinedPath.addPath(leftEyeHole)
+      combinedPath.addPath(rightEyeHole)
       combinedPath.addPath(mouthPath)
 
       // 填充面具（使用 evenodd 规则让五官镂空）
