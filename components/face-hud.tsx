@@ -340,46 +340,9 @@ export default forwardRef(function FaceHUD(
     return dpr
   }
 
-  // 1. 点阵模式 (dots) - 显示全部468个关键点
-  function drawDots(ctx: CanvasRenderingContext2D, landmarks: number[][], w: number, h: number, mirrored: boolean) {
-    const dpr = setupCanvasTransform(ctx, w, h, mirrored)
 
-    // 绘制所有关键点
-    ctx.fillStyle = '#ffffff'
-    for (const point of landmarks) {
-      if (point && point[0] !== undefined && point[1] !== undefined) {
-        ctx.beginPath()
-        ctx.arc(point[0], point[1], 1.5, 0, Math.PI * 2)
-        ctx.fill()
-      }
-    }
 
-    // 用不同颜色区分五官
-    const drawFeaturePoints = (indices: number[], color: string, radius = 2) => {
-      ctx.fillStyle = color
-      for (const idx of indices) {
-        if (landmarks[idx]) {
-          ctx.beginPath()
-          ctx.arc(landmarks[idx][0], landmarks[idx][1], radius, 0, Math.PI * 2)
-          ctx.fill()
-        }
-      }
-    }
-
-    // 眼睛 - 蓝色
-    drawFeaturePoints(FACEMESH_CONTOURS.leftEye, '#00aaff', 2)
-    drawFeaturePoints(FACEMESH_CONTOURS.rightEye, '#00aaff', 2)
-
-    // 嘴巴 - 红色
-    drawFeaturePoints(FACEMESH_CONTOURS.lipsOuter, '#ff4444', 2)
-
-    // 鼻梁 - 绿色
-    drawFeaturePoints(FACEMESH_CONTOURS.noseTip, '#44ff44', 2.5)
-
-    // 脸轮廓 - 黄色
-    drawFeaturePoints(FACEMESH_CONTOURS.faceOval, '#ffaa00', 1.8)
-  }
-
+  // 主绘制函数
   function drawFace(ctx: CanvasRenderingContext2D, points: number[][]) {
     const m = modeRef.current
     const w = ctx.canvas.width / (window.devicePixelRatio || 1)
@@ -387,146 +350,176 @@ export default forwardRef(function FaceHUD(
     const mirrored = mirrorRef.current
 
     if (m === "points") {
-      drawDots(ctx, points, w, h, mirrored)
+      // 点阵模式 - 显示全部468个关键点
+      const dpr = setupCanvasTransform(ctx, w, h, mirrored)
+
+      // 绘制所有关键点
+      ctx.fillStyle = '#ffffff'
+      for (const point of points) {
+        if (point && point[0] !== undefined && point[1] !== undefined) {
+          ctx.beginPath()
+          ctx.arc(point[0], point[1], 1.5, 0, Math.PI * 2)
+          ctx.fill()
+        }
+      }
+
+      // 用不同颜色区分五官
+      const drawFeaturePoints = (indices: number[], color: string, radius = 2) => {
+        ctx.fillStyle = color
+        for (const idx of indices) {
+          if (points[idx]) {
+            ctx.beginPath()
+            ctx.arc(points[idx][0], points[idx][1], radius, 0, Math.PI * 2)
+            ctx.fill()
+          }
+        }
+      }
+
+      // 眼睛 - 蓝色
+      drawFeaturePoints(FACEMESH_CONTOURS.leftEye, '#00aaff', 2)
+      drawFeaturePoints(FACEMESH_CONTOURS.rightEye, '#00aaff', 2)
+
+      // 嘴巴 - 红色
+      drawFeaturePoints(FACEMESH_CONTOURS.lipsOuter, '#ff4444', 2)
+
+      // 鼻梁 - 绿色
+      drawFeaturePoints(FACEMESH_CONTOURS.noseTip, '#44ff44', 2.5)
+
+      // 脸轮廓 - 黄色
+      drawFeaturePoints(FACEMESH_CONTOURS.faceOval, '#ffaa00', 1.8)
       return
     }
 
     if (m === "wireframe") {
-      drawWireframe(ctx, points, w, h, mirrored)
+      // 线框模式 - 使用官方连接索引
+      const dpr = setupCanvasTransform(ctx, w, h, mirrored)
+
+      // 绘制连接线的辅助函数
+      const drawConnectors = (indices: number[], color: string, lineWidth = 1) => {
+        if (indices.length < 2) return
+
+        ctx.strokeStyle = color
+        ctx.lineWidth = lineWidth
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+
+        ctx.beginPath()
+        let started = false
+        for (const idx of indices) {
+          if (points[idx]) {
+            if (!started) {
+              ctx.moveTo(points[idx][0], points[idx][1])
+              started = true
+            } else {
+              ctx.lineTo(points[idx][0], points[idx][1])
+            }
+          }
+        }
+        ctx.stroke()
+      }
+
+      // 面部外框 - 白色
+      drawConnectors([...FACEMESH_CONTOURS.faceOval, FACEMESH_CONTOURS.faceOval[0]], '#ffffff', 1.5)
+
+      // 眼睛轮廓 - 亮蓝色
+      drawConnectors([...FACEMESH_CONTOURS.leftEye, FACEMESH_CONTOURS.leftEye[0]], '#00ddff', 1.2)
+      drawConnectors([...FACEMESH_CONTOURS.rightEye, FACEMESH_CONTOURS.rightEye[0]], '#00ddff', 1.2)
+
+      // 眉毛 - 亮绿色
+      drawConnectors(FACEMESH_CONTOURS.leftEyebrow, '#44ff88', 1.5)
+      drawConnectors(FACEMESH_CONTOURS.rightEyebrow, '#44ff88', 1.5)
+
+      // 嘴巴轮廓 - 亮红色
+      drawConnectors([...FACEMESH_CONTOURS.lipsOuter, FACEMESH_CONTOURS.lipsOuter[0]], '#ff4466', 1.3)
+      drawConnectors([...FACEMESH_CONTOURS.lipsInner, FACEMESH_CONTOURS.lipsInner[0]], '#ff6688', 1)
+
+      // 鼻子轮廓 - 亮黄色
+      drawConnectors(FACEMESH_CONTOURS.noseBottom, '#ffdd44', 1.2)
+
+      // 鼻尖点
+      for (const idx of FACEMESH_CONTOURS.noseTip) {
+        if (points[idx]) {
+          ctx.fillStyle = '#ffdd44'
+          ctx.beginPath()
+          ctx.arc(points[idx][0], points[idx][1], 2, 0, Math.PI * 2)
+          ctx.fill()
+        }
+      }
       return
     }
 
     if (m === "mask") {
-      drawMask(ctx, points, w, h, mirrored)
+      // 灰色面具模式 - 使用 Path2D 和 evenodd 填充
+      const dpr = setupCanvasTransform(ctx, w, h, mirrored)
+
+      // 创建面部外轮廓路径
+      const facePath = new Path2D()
+      let started = false
+      for (const idx of FACEMESH_CONTOURS.faceOval) {
+        if (points[idx]) {
+          if (!started) {
+            facePath.moveTo(points[idx][0], points[idx][1])
+            started = true
+          } else {
+            facePath.lineTo(points[idx][0], points[idx][1])
+          }
+        }
+      }
+      facePath.closePath()
+
+      // 创建眼睛洞路径
+      const createEyeHole = (eyeIndices: number[]) => {
+        const eyePath = new Path2D()
+        let eyeStarted = false
+        for (const idx of eyeIndices) {
+          if (points[idx]) {
+            if (!eyeStarted) {
+              eyePath.moveTo(points[idx][0], points[idx][1])
+              eyeStarted = true
+            } else {
+              eyePath.lineTo(points[idx][0], points[idx][1])
+            }
+          }
+        }
+        eyePath.closePath()
+        return eyePath
+      }
+
+      // 创建嘴巴洞路径
+      const mouthPath = new Path2D()
+      let mouthStarted = false
+      for (const idx of FACEMESH_CONTOURS.lipsOuter) {
+        if (points[idx]) {
+          if (!mouthStarted) {
+            mouthPath.moveTo(points[idx][0], points[idx][1])
+            mouthStarted = true
+          } else {
+            mouthPath.lineTo(points[idx][0], points[idx][1])
+          }
+        }
+      }
+      mouthPath.closePath()
+
+      // 合并所有路径
+      const combinedPath = new Path2D()
+      combinedPath.addPath(facePath)
+      combinedPath.addPath(createEyeHole(FACEMESH_CONTOURS.leftEye))
+      combinedPath.addPath(createEyeHole(FACEMESH_CONTOURS.rightEye))
+      combinedPath.addPath(mouthPath)
+
+      // 填充面具（使用 evenodd 规则让五官镂空）
+      ctx.fillStyle = 'rgba(200,200,200,0.45)'
+      ctx.fill(combinedPath, 'evenodd')
+
+      // 描边
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 0.8
+      ctx.stroke(facePath)
       return
     }
   }
 
-  // 2. 线框模式 (wireframe) - 使用官方连接索引
-  function drawWireframe(ctx: CanvasRenderingContext2D, landmarks: number[][], w: number, h: number, mirrored: boolean) {
-    const dpr = setupCanvasTransform(ctx, w, h, mirrored)
 
-    // 绘制连接线的辅助函数
-    const drawConnectors = (indices: number[], color: string, lineWidth = 1) => {
-      if (indices.length < 2) return
-
-      ctx.strokeStyle = color
-      ctx.lineWidth = lineWidth
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-
-      ctx.beginPath()
-      let started = false
-      for (const idx of indices) {
-        if (landmarks[idx]) {
-          if (!started) {
-            ctx.moveTo(landmarks[idx][0], landmarks[idx][1])
-            started = true
-          } else {
-            ctx.lineTo(landmarks[idx][0], landmarks[idx][1])
-          }
-        }
-      }
-      ctx.stroke()
-    }
-
-    // 面部外框 - 白色
-    drawConnectors([...FACEMESH_CONTOURS.faceOval, FACEMESH_CONTOURS.faceOval[0]], '#ffffff', 1.5)
-
-    // 眼睛轮廓 - 亮蓝色
-    drawConnectors([...FACEMESH_CONTOURS.leftEye, FACEMESH_CONTOURS.leftEye[0]], '#00ddff', 1.2)
-    drawConnectors([...FACEMESH_CONTOURS.rightEye, FACEMESH_CONTOURS.rightEye[0]], '#00ddff', 1.2)
-
-    // 眉毛 - 亮绿色
-    drawConnectors(FACEMESH_CONTOURS.leftEyebrow, '#44ff88', 1.5)
-    drawConnectors(FACEMESH_CONTOURS.rightEyebrow, '#44ff88', 1.5)
-
-    // 嘴巴轮廓 - 亮红色
-    drawConnectors([...FACEMESH_CONTOURS.lipsOuter, FACEMESH_CONTOURS.lipsOuter[0]], '#ff4466', 1.3)
-    drawConnectors([...FACEMESH_CONTOURS.lipsInner, FACEMESH_CONTOURS.lipsInner[0]], '#ff6688', 1)
-
-    // 鼻子轮廓 - 亮黄色
-    drawConnectors(FACEMESH_CONTOURS.noseBottom, '#ffdd44', 1.2)
-
-    // 鼻尖点
-    for (const idx of FACEMESH_CONTOURS.noseTip) {
-      if (landmarks[idx]) {
-        ctx.fillStyle = '#ffdd44'
-        ctx.beginPath()
-        ctx.arc(landmarks[idx][0], landmarks[idx][1], 2, 0, Math.PI * 2)
-        ctx.fill()
-      }
-    }
-  }
-
-  // 3. 灰色面具模式 (mask) - 使用 Path2D 和 evenodd 填充
-  function drawMask(ctx: CanvasRenderingContext2D, landmarks: number[][], w: number, h: number, mirrored: boolean) {
-    const dpr = setupCanvasTransform(ctx, w, h, mirrored)
-
-    // 创建面部外轮廓路径
-    const facePath = new Path2D()
-    let started = false
-    for (const idx of FACEMESH_CONTOURS.faceOval) {
-      if (landmarks[idx]) {
-        if (!started) {
-          facePath.moveTo(landmarks[idx][0], landmarks[idx][1])
-          started = true
-        } else {
-          facePath.lineTo(landmarks[idx][0], landmarks[idx][1])
-        }
-      }
-    }
-    facePath.closePath()
-
-    // 创建眼睛洞路径
-    const createEyeHole = (eyeIndices: number[]) => {
-      const eyePath = new Path2D()
-      let eyeStarted = false
-      for (const idx of eyeIndices) {
-        if (landmarks[idx]) {
-          if (!eyeStarted) {
-            eyePath.moveTo(landmarks[idx][0], landmarks[idx][1])
-            eyeStarted = true
-          } else {
-            eyePath.lineTo(landmarks[idx][0], landmarks[idx][1])
-          }
-        }
-      }
-      eyePath.closePath()
-      return eyePath
-    }
-
-    // 创建嘴巴洞路径
-    const mouthPath = new Path2D()
-    let mouthStarted = false
-    for (const idx of FACEMESH_CONTOURS.lipsOuter) {
-      if (landmarks[idx]) {
-        if (!mouthStarted) {
-          mouthPath.moveTo(landmarks[idx][0], landmarks[idx][1])
-          mouthStarted = true
-        } else {
-          mouthPath.lineTo(landmarks[idx][0], landmarks[idx][1])
-        }
-      }
-    }
-    mouthPath.closePath()
-
-    // 合并所有路径
-    const combinedPath = new Path2D()
-    combinedPath.addPath(facePath)
-    combinedPath.addPath(createEyeHole(FACEMESH_CONTOURS.leftEye))
-    combinedPath.addPath(createEyeHole(FACEMESH_CONTOURS.rightEye))
-    combinedPath.addPath(mouthPath)
-
-    // 填充面具（使用 evenodd 规则让五官镂空）
-    ctx.fillStyle = 'rgba(200,200,200,0.45)'
-    ctx.fill(combinedPath, 'evenodd')
-
-    // 描边
-    ctx.strokeStyle = '#ffffff'
-    ctx.lineWidth = 0.8
-    ctx.stroke(facePath)
-  }
 
   async function loop() {
     const canvas = canvasRef.current
