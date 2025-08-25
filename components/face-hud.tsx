@@ -413,6 +413,10 @@ export default forwardRef(function FaceHUD(
       drawEdges(CONTOUR_EDGES[6], '#44ff88', 1.5)
       // 鼻下与鼻梁：亮黄
       drawEdges(CONTOUR_EDGES[7], '#ffdd44', 1.2)
+
+      // 可选：全网格（浅灰）——这里默认开启，如需关闭可调颜色透明度为0或加开关
+      drawEdges(TESSELLATION_EDGES, 'rgba(255,255,255,0.18)', 0.6)
+
       // 鼻尖点
       for (const idx of FACEMESH_CONTOURS.noseTip) {
         if (points[idx]) {
