@@ -5,6 +5,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { cn } from "@/lib/utils"
 import { createFaceLandmarker, hasMediapipeSupport } from "@/lib/tracking/mediapipe"
 import { FACE_OVAL, LEFT_EYE, RIGHT_EYE, LEFT_EYEBROW, RIGHT_EYEBROW, LIPS_OUTER, LIPS_INNER, NOSE_BOTTOM, CONTOUR_EDGES } from "./face-constants"
+import { TESSELLATION_EDGES } from "./face-tessellation"
 
 export type FaceHUDHandle = {
   start: () => Promise<void>

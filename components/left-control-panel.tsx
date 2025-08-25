@@ -292,7 +292,7 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
     faceFps: 30, // 恢复到 30fps，像 Kalidokit 示例
     enablePose: false,
     enableHands: false,
-    hud: { mode: "points", size: 200 },
+    hud: { mode: "wireframe", size: 200 },
     face: {
       smoothing: 0.6,
       expressionIntensity: 1,
@@ -697,7 +697,7 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
                   active={faceActive}
                   width={1}
                   height={1}
-                  mode="points"
+                  mode="wireframe"
                   mirror={faceCfg.mirror}
                   position="custom"
                   draggable={false}
@@ -1011,7 +1011,7 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
                       active={faceActive}
                       width={1}
                       height={1}
-                      mode="points"
+                      mode="wireframe"
                       mirror={faceCfg.mirror}
                       position="custom"
                       draggable={false}
