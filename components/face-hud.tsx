@@ -95,6 +95,7 @@ export default forwardRef(function FaceHUD(
 ) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null) // for tongue sampling
   const streamRef = useRef<MediaStream | null>(null)
   const rafRef = useRef<number | null>(null)
   const runningRef = useRef(false)
@@ -336,7 +337,7 @@ export default forwardRef(function FaceHUD(
 
 
   // 主绘制函数
-  function drawFace(ctx: CanvasRenderingContext2D, points: number[][]) {
+  function drawFace(ctx: CanvasRenderingContext2D, points: number[][], videoPts: number[][] | null, vw?: number, vh?: number) {
     const m = modeRef.current
     const w = ctx.canvas.width / (window.devicePixelRatio || 1)
     const h = ctx.canvas.height / (window.devicePixelRatio || 1)
@@ -375,6 +376,45 @@ export default forwardRef(function FaceHUD(
 
       // 鼻梁 - 绿色
       drawFeaturePoints(FACEMESH_CONTOURS.noseTip, '#44ff44', 2.5)
+
+      // 舌头：当 mouth 内部出现显著的“粉色/红色”时，填充一个小的椭圆表示
+      try {
+        if (videoPts && vw && vh) {
+          const scaleX = (v:number) => v * (w / vw)
+          const scaleY = (v:number) => v * (h / vh)
+          const mouth = LIPS_INNER.length ? LIPS_INNER : LIPS_OUTER
+          const mx = mouth.map(i => videoPts[i]).filter(Boolean) as number[][]
+          if (mx.length >= 3) {
+            // 计算内唇中心与范围
+            let sx=0, sy=0; for (const p of mx) { sx+=p[0]; sy+=p[1] }
+            const cx = sx / mx.length, cy = sy / mx.length
+            const rx = 0.06 * w, ry = 0.035 * h // 小椭圆
+            // 取样视频帧像素（基于画布，不复制整帧）
+            const sCanvas = sampleCanvasRef.current || (sampleCanvasRef.current = document.createElement('canvas'))
+            const sctx = sCanvas.getContext('2d')
+            const video = videoRef.current!
+            sCanvas.width = 64; sCanvas.height = 64
+            if (sctx) {
+              sctx.drawImage(video, cx-32, cy-32, 64, 64, 0,0,64,64)
+              const img = sctx.getImageData(0,0,64,64).data
+              let redish = 0, total = 0
+              for (let i=0;i<img.length;i+=4){
+                const r=img[i], g=img[i+1], b=img[i+2]
+                // 简单红色检测：r高于g和b一定阈值
+                if (r>135 && r>g+25 && r>b+25) redish++
+                total++
+              }
+              const ratio = redish/total
+              if (ratio > 0.08) { // 有明显舌头红色
+                ctx.fillStyle = 'rgba(255,105,180,0.85)'
+                ctx.beginPath()
+                ctx.ellipse(cx * (w/vw), cy * (h/vh), rx, ry, 0, 0, Math.PI*2)
+                ctx.fill()
+              }
+            }
+          }
+        }
+      } catch {}
 
       // 脸轮廓 - 黄色
       drawFeaturePoints(FACEMESH_CONTOURS.faceOval, '#ffaa00', 1.8)
@@ -618,7 +658,7 @@ export default forwardRef(function FaceHUD(
 
             // 转换到画布坐标系进行绘制
             const canvasPts = sm.map((p: any) => [p[0] * w / vw, p[1] * h / vh, p[2]])
-            drawFace(ctx, canvasPts)
+            drawFace(ctx, canvasPts, sm, vw, vh)
 
             ctx.restore()
 
