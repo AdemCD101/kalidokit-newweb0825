@@ -4,7 +4,7 @@ import type React from "react"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { createFaceLandmarker, hasMediapipeSupport } from "@/lib/tracking/mediapipe"
-import { FACE_OVAL, LEFT_EYE, RIGHT_EYE, LEFT_EYEBROW, RIGHT_EYEBROW, LIPS_OUTER, LIPS_INNER, NOSE_BOTTOM, CONTOUR_EDGES } from "./face-constants"
+import { FACE_OVAL, LEFT_EYE, RIGHT_EYE, LEFT_EYEBROW, RIGHT_EYEBROW, LIPS_OUTER, LIPS_INNER, NOSE_BOTTOM, CONTOUR_EDGES, NOSE_BRIDGE, NOSE_NOSTRILS } from "./face-constants"
 import { TESSELLATION_EDGES } from "./face-tessellation"
 
 export type FaceHUDHandle = {
@@ -502,6 +502,21 @@ export default forwardRef(function FaceHUD(
       drawEdges(CONTOUR_EDGES[2], '#00ddff', 1.0)
       // 唇（仅外环）
       drawEdges(CONTOUR_EDGES[3], '#ff4466', 1.1)
+      // 鼻梁（短线）与鼻翼（鼻孔外缘）——避免跨面长折线
+      drawEdges(CONTOUR_EDGES[8], '#ffdd44', 1.0)
+      const drawNostrils = (idxs: number[]) => {
+        for (let i = 1; i < idxs.length; i++) {
+          const a = idxs[i - 1], b = idxs[i]
+          if (!points[a] || !points[b]) continue
+          ctx.strokeStyle = '#ffdd44'
+          ctx.lineWidth = 1.0
+          ctx.beginPath()
+          ctx.moveTo(points[a][0], points[a][1])
+          ctx.lineTo(points[b][0], points[b][1])
+          ctx.stroke()
+        }
+      }
+      drawNostrils(NOSE_NOSTRILS)
 
       return
     }

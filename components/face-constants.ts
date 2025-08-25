@@ -29,6 +29,8 @@ export const RIGHT_EYEBROW = [300,293,334,296,336,285,295,282,283,276]
 export const NOSE_BOTTOM = [
   20,94,125,141,235,31,228,229,230,231,232,233,244,245,122,6,202,214,234
 ]
+// A trimmed nostril polyline (no long cross-face links)
+export const NOSE_NOSTRILS = [94,141,235,31,228,229,230,231,232,233,244,245]
 export const NOSE_BRIDGE = [168,6,197,195,5,4]
 
 // Helpers
