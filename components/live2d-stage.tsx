@@ -52,19 +52,27 @@ export default function Live2DStage({
         await ensureCubismCore()
         if (cancelled) return
         const { Application, Ticker } = await import("pixi.js")
-        const { Live2DModel } = await import("pixi-live2d-display/cubism4")
+        const { Live2DModel } = await import("pixi-live2d-display-advanced/cubism4")
 
-        // Create Pixi application (Pixi v6 API)
-        const app = new Application({ backgroundAlpha: 0, resizeTo: containerRef.current ?? window } as any)
+        // Create Pixi application (PIXI v7 API)
+        const app = new Application({
+          backgroundAlpha: 0,
+          resizeTo: containerRef.current ?? window,
+          resolution: window.devicePixelRatio || 1,
+          autoDensity: true
+        })
         appRef.current = app
 
         // mount canvas
         const el = containerRef.current
         if (!el) return
         el.innerHTML = ""
-        el.appendChild((app as any).view)
+        el.appendChild(app.canvas)  // PIXI v7 uses app.canvas instead of app.view
 
-        // Register ticker for pixi-live2d-display (Pixi v6 uses shared ticker instance)
+        // Set PIXI global for Live2D
+        ;(window as any).PIXI = { Application, Ticker }
+
+        // Register ticker for pixi-live2d-display (PIXI v7 compatible)
         ;(Live2DModel as any).registerTicker?.(Ticker.shared)
 
         // load model from public directory

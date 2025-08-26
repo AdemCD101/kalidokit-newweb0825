@@ -1,0 +1,33 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "YaoRui Swimsuit Maid.moc3",
+		"Textures": [
+			"YaoRui Swimsuit Maid.4096/texture_00.png",
+			"YaoRui Swimsuit Maid.4096/texture_01.png",
+			"YaoRui Swimsuit Maid.4096/texture_02.png",
+			"YaoRui Swimsuit Maid.4096/texture_03.png",
+			"YaoRui Swimsuit Maid.4096/texture_04.png"
+		],
+		"Physics": "YaoRui Swimsuit Maid.physics3.json",
+		"DisplayInfo": "YaoRui Swimsuit Maid.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": [
+				"ParamMouthOpenY",
+				"ParamMouthForm"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeROpen",
+				"ParamEyeLOpen"
+			]
+		}
+	]
+}

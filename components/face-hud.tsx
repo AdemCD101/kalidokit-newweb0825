@@ -377,91 +377,7 @@ export default forwardRef(function FaceHUD(
       // 鼻梁 - 绿色
       drawFeaturePoints(FACEMESH_CONTOURS.noseTip, '#44ff44', 2.5)
 
-      // 舌头：当 mouth 内部出现显著的“粉色/红色”时，填充一个小的椭圆表示
-      try {
-        if (blendshapes && videoPts && vw && vh) {
-          // 1. 检查 blendshapes 中的嘴部开合度
-          const jawOpen = blendshapes.find((b: any) => b.categoryName === 'jawOpen')?.score || 0
-          const mouthOpen = blendshapes.find((b: any) => b.categoryName === 'mouthOpen')?.score || 0
-
-          // 嘴部需要有一定开合度才可能看到舌头
-          if (jawOpen > 0.1 || mouthOpen > 0.05) {
-            const mouth = LIPS_INNER.length ? LIPS_INNER : LIPS_OUTER
-            const mx = mouth.map(i => videoPts[i]).filter(Boolean) as number[][]
-            if (mx.length >= 3) {
-              // 计算内唇中心和下唇位置
-              let sx = 0, sy = 0, bottomY = -Infinity
-              for (const p of mx) {
-                sx += p[0]; sy += p[1]
-                bottomY = Math.max(bottomY, p[1]) // 找到最下方的唇点
-              }
-              const cx = sx / mx.length
-              const cy = sy / mx.length
-
-              // 采样区域扩大到嘴部下方，检测舌头伸出程度
-              const sampleSize = 48
-              const sCanvas = sampleCanvasRef.current || (sampleCanvasRef.current = document.createElement('canvas'))
-              const sctx = sCanvas.getContext('2d')
-              const video = videoRef.current!
-              sCanvas.width = sampleSize; sCanvas.height = sampleSize
-              if (sctx) {
-                // 采样区域向下偏移，覆盖舌头可能伸出的区域
-                const offsetY = 8 // 向下偏移
-                sctx.drawImage(video, cx - sampleSize/2, cy - sampleSize/2 + offsetY, sampleSize, sampleSize, 0, 0, sampleSize, sampleSize)
-                const img = sctx.getImageData(0, 0, sampleSize, sampleSize).data
-
-                let redPixels = 0, totalPixels = 0
-                let maxRedY = 0 // 记录红色像素的最大Y位置（舌头伸出程度）
-
-                for (let y = 0; y < sampleSize; y++) {
-                  for (let x = 0; x < sampleSize; x++) {
-                    const i = (y * sampleSize + x) * 4
-                    const r = img[i], g = img[i + 1], b = img[i + 2]
-                    // 舌头红色检测
-                    if (r > 110 && r > g + 15 && r > b + 15 && (r - Math.max(g, b)) > 25) {
-                      redPixels++
-                      maxRedY = Math.max(maxRedY, y)
-                    }
-                    totalPixels++
-                  }
-                }
-
-                const redRatio = redPixels / totalPixels
-                if (redRatio > 0.08) { // 舌头检测成功
-                  // 计算舌头伸出程度和开口程度（用于后续模型应用）
-                  const tongueExtension = Math.max(0, (maxRedY / sampleSize - 0.5) * 2) // 0-1范围
-                  const openness = Math.max(jawOpen, mouthOpen) // 开口程度
-
-                  // 将舌头检测结果存储到全局状态（供其他模型使用）
-                  // 可以通过 window 对象或事件系统传递给其他组件
-                  if (typeof window !== 'undefined') {
-                    window.tongueDetection = {
-                      detected: true,
-                      extension: tongueExtension,
-                      openness: openness,
-                      timestamp: Date.now()
-                    }
-                  }
-
-                  // 不再绘制舌头可视化，但保持检测逻辑
-                  // console.log('Tongue detected:', { extension: tongueExtension, openness })
-                } else {
-                  // 未检测到舌头时清除状态
-                  if (typeof window !== 'undefined') {
-                    window.tongueDetection = {
-                      detected: false,
-                      extension: 0,
-                      openness: Math.max(jawOpen, mouthOpen),
-                      timestamp: Date.now()
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      } catch {}
-
+      // 舌头检测与显示逻辑已移除：在 MediaPipe 模式下不再尝试识别或展示舌头
       // 脸轮廓 - 黄色
       drawFeaturePoints(FACEMESH_CONTOURS.faceOval, '#ffaa00', 1.8)
       return
@@ -513,7 +429,7 @@ export default forwardRef(function FaceHUD(
         }
       }
 
-      // 舌头检测与显示（线框模式）- 使用相同的动态检测逻辑
+      // 舌头检测在 MediaPipe 模式下已移除（线框模式不处理）
       try {
         if (blendshapes && videoPts && vw && vh) {
           const jawOpen = blendshapes.find((b: any) => b.categoryName === 'jawOpen')?.score || 0
@@ -552,32 +468,7 @@ export default forwardRef(function FaceHUD(
                   }
                 }
 
-                const redRatio = redPixels / totalPixels
-                if (redRatio > 0.08) {
-                  const tongueExtension = Math.max(0, (maxRedY / sampleSize - 0.5) * 2)
-                  const openness = Math.max(jawOpen, mouthOpen)
-
-                  // 存储舌头检测结果供其他模型使用
-                  if (typeof window !== 'undefined') {
-                    window.tongueDetection = {
-                      detected: true,
-                      extension: tongueExtension,
-                      openness: openness,
-                      timestamp: Date.now()
-                    }
-                  }
-                  // 不绘制舌头可视化
-                } else {
-                  // 未检测到舌头时清除状态
-                  if (typeof window !== 'undefined') {
-                    window.tongueDetection = {
-                      detected: false,
-                      extension: 0,
-                      openness: Math.max(jawOpen, mouthOpen),
-                      timestamp: Date.now()
-                    }
-                  }
-                }
+                // 线框模式不做舌头检测，避免重复逻辑
               }
             }
           }
@@ -704,7 +595,7 @@ export default forwardRef(function FaceHUD(
         }
       }
 
-      // 舌头检测与显示（面具模式）- 使用相同的动态检测逻辑
+      // 舌头检测在 MediaPipe 模式下已移除（面具模式不处理）
       try {
         if (blendshapes && videoPts && vw && vh) {
           const jawOpen = blendshapes.find((b: any) => b.categoryName === 'jawOpen')?.score || 0
@@ -743,32 +634,7 @@ export default forwardRef(function FaceHUD(
                   }
                 }
 
-                const redRatio = redPixels / totalPixels
-                if (redRatio > 0.08) {
-                  const tongueExtension = Math.max(0, (maxRedY / sampleSize - 0.5) * 2)
-                  const openness = Math.max(jawOpen, mouthOpen)
-
-                  // 存储舌头检测结果供其他模型使用
-                  if (typeof window !== 'undefined') {
-                    window.tongueDetection = {
-                      detected: true,
-                      extension: tongueExtension,
-                      openness: openness,
-                      timestamp: Date.now()
-                    }
-                  }
-                  // 不绘制舌头可视化
-                } else {
-                  // 未检测到舌头时清除状态
-                  if (typeof window !== 'undefined') {
-                    window.tongueDetection = {
-                      detected: false,
-                      extension: 0,
-                      openness: Math.max(jawOpen, mouthOpen),
-                      timestamp: Date.now()
-                    }
-                  }
-                }
+                // 面具模式不做舌头检测，避免重复逻辑
               }
             }
           }
@@ -846,7 +712,7 @@ export default forwardRef(function FaceHUD(
             const sm = smoothLandmarks(prevFaceRef.current, pts, smoothing)
             prevFaceRef.current = sm
 
-            // 转换到画布坐标系进行绘制
+            // 舌头检测逻辑已删除（MediaPipe 模式不再识别舌头）
             const canvasPts = sm.map((p: any) => [p[0] * w / vw, p[1] * h / vh, p[2]])
             drawFace(ctx, canvasPts, sm, vw, vh, blendshapes)
 
@@ -864,6 +730,8 @@ export default forwardRef(function FaceHUD(
                   maxRotationDegrees: 30,   // 限制头部旋转角度
                 })
                 if (solved) {
+                  // 附加 MediaPipe 的 blendshapes 到 solved，便于下游融合
+                  try { (solved as any).blendshapes = blendshapes } catch {}
                   // 直接发布，不用 await import
                   try {
                     const { publishFaceSolved } = await import("@/lib/tracking/result-bus")

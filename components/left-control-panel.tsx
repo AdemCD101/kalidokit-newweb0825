@@ -256,6 +256,8 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
     faceFps: number
     enablePose: boolean
     enableHands: boolean
+    // 捕捉模式：默认模式(MediaPipe) 与 苹果面捕模式(ARKit)
+    trackingMode: "mediapipe" | "arkit"
     hud: {
       mode: "points" | "mask" | "wireframe"
       size: number
@@ -292,6 +294,7 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
     faceFps: 30, // 恢复到 30fps，像 Kalidokit 示例
     enablePose: false,
     enableHands: false,
+    trackingMode: "mediapipe", // 默认模式：MediaPipe
     hud: { mode: "wireframe", size: 200 },
     face: {
       smoothing: 0.6,
@@ -326,7 +329,7 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
     }
 
     // 检查是否需要迁移
-    const needsMigration = !stored.smoothing || !stored.smile
+    const needsMigration = !stored.smoothing || !stored.smile || !stored.trackingMode
     if (needsMigration) {
       console.log("[LeftControlPanel] 检测到旧配置，正在迁移...")
     }
@@ -335,6 +338,7 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
     const migrated = {
       ...defaultFaceCfg,
       ...stored,
+      trackingMode: stored.trackingMode ?? "mediapipe",
       // 确保嵌套对象完整
       face: {
         ...defaultFaceCfg.face,
@@ -1094,6 +1098,28 @@ export default forwardRef<HTMLDivElement, Props>(function LeftControlPanel(
                           <div className="text-xs text-muted-foreground">手部关键点，默认关闭</div>
                         </div>
                         <Switch checked={faceCfg.enableHands} onCheckedChange={(v) => updateFaceCfg({ enableHands: v })} />
+                      <div className="space-y-2">
+                        <Label>捕捉模式</Label>
+                        <Select
+                          value={faceCfg.trackingMode}
+                          onValueChange={(v: "mediapipe" | "arkit") => {
+                            updateFaceCfg({ trackingMode: v })
+                          }}
+                        >
+                          <SelectTrigger onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                            <SelectItem value="mediapipe" onClick={(e) => e.stopPropagation()}>默认模式（MediaPipe）</SelectItem>
+                            <SelectItem value="arkit" onClick={(e) => e.stopPropagation()}>苹果面捕模式（ARKit）</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <div className="text-xs text-muted-foreground">
+                          {faceCfg.trackingMode === 'mediapipe' && '默认模式。当前仅启用 MediaPipe（不包含舌头识别）。'}
+                          {faceCfg.trackingMode === 'arkit' && '苹果面捕模式（即将开发）。本模式尚未启用。'}
+                        </div>
+                      </div>
+
                       </div>
                     </CardContent>
                   </Card>

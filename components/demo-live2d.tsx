@@ -62,10 +62,31 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
   const handsOptsKeyRef = useRef<string>("")
   const kalidokitRef = useRef<any | null>(null)
   const motionManagerSetupRef = useRef<boolean>(false)
+  const mouthOpenParamIdsRef = useRef<string[]>(["ParamMouthOpenY"]) // 自动探测后扩充
+  const mouthFormParamIdsRef = useRef<string[]>(["ParamMouthForm"])   // 自动探测后扩充
   const [error, setError] = useState<string | null>(null)
 
   // 保存历史值用于平滑，像 Kalidokit 示例
   const oldLookTargetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
+
+  // Filter noisy [DemoLive2D] console logs unless explicitly enabled
+  const origConsoleLogRef = useRef<((...args: any[]) => void) | null>(null)
+  useEffect(() => {
+    const orig = console.log
+    origConsoleLogRef.current = orig
+    const enabled = (typeof localStorage !== 'undefined' && localStorage.getItem('studio.debugLogs') === '1') || (typeof window !== 'undefined' && (window as any).__LIVE2D_DEBUG === true)
+    const filteredPrefixes = ['[DemoLive2D]', '[FaceHUD]', '[LeftControlPanel]']
+    console.log = (...args: any[]) => {
+      try {
+        const first = String(args?.[0] ?? '')
+        // Drop noisy logs unless debug explicitly enabled
+        if (!enabled && filteredPrefixes.some(p => first.startsWith(p))) return
+      } catch {}
+      orig(...args)
+    }
+    return () => { if (origConsoleLogRef.current) console.log = origConsoleLogRef.current }
+  }, [])
+
   const prevEyeStateRef = useRef<{ l: number; r: number }>({ l: 1, r: 1 })
 
   // 嘴形平滑历史值 - 像 Kalidokit 示例
@@ -75,7 +96,6 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
     rawOpenY: number;
     rawForm: number;
   }>({ openY: 0, form: 0, rawOpenY: 0, rawForm: 0 })
-
   // 眨眼平滑历史值 - 增强版
   const prevEyeRawStateRef = useRef<{ l: number; r: number }>({ l: 1, r: 1 })
 
@@ -95,20 +115,40 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
     let cancelled = false
     ;(async () => {
       try {
-        // Load exact versions used by Kalidokit demo
-        // Core -> Pixi -> Live2D plugin (cubism4-only build to avoid cubism2 runtime requirement)
+        // Load upgraded versions: Cubism 5.1.0 + PIXI v7 + pixi-live2d-display-advanced
         await loadScript("/vendor/live2d/live2dcubismcore.min.js")
-        await loadScript("/vendor/pixi/pixi-5.1.3.min.js")
-        await loadScript("/vendor/pixi-live2d/pixi-live2d-display-0.3.1-cubism4.min.js")
-        await loadScript("/vendor/kalidokit/kalidokit-1.1.umd.js")
+
+        // Use modern ES modules instead of old script loading
+        const PIXI = await import("pixi.js")
+        const { Live2DModel } = await import("pixi-live2d-display-advanced/cubism4")
+        const kalidokitModule = await import("kalidokit")
+        const Kalidokit = kalidokitModule.default || kalidokitModule
+
+        // Set globals for compatibility
+        ;(window as any).PIXI = PIXI
+        ;(window as any).Kalidokit = Kalidokit
         if (cancelled) return
 
         // Create pipelines with initial tuning — Face now subscribes to FaceHUD bus instead of own pipeline
         if (stream) {
           try {
             const { subscribeFaceSolved } = await import("@/lib/tracking/result-bus")
-            faceUnsubRef.current = subscribeFaceSolved((r) => { latestFaceRef.current = r })
-          } catch {}
+            faceUnsubRef.current = subscribeFaceSolved((r) => {
+              latestFaceRef.current = r
+              // 调试：检查面部数据是否正确接收
+              if (r && r.mouth) {
+                console.log("[DemoLive2D] 🔍 接收到面部数据:", {
+                  mouthX: r.mouth.x?.toFixed(3),
+                  mouthY: r.mouth.y?.toFixed(3),
+                  hasShape: !!r.mouth.shape,
+                  timestamp: Date.now()
+                })
+              }
+            })
+            console.log("[DemoLive2D] ✅ 已订阅面部数据总线")
+          } catch (err) {
+            console.error("[DemoLive2D] ❌ 订阅面部数据总线失败:", err)
+          }
           if (cfg.enablePose) {
             posePipelineRef.current = await createPosePipeline({
               stream,
@@ -149,18 +189,18 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
           }
         }
 
-        const PIXI: any = (window as any).PIXI
-        const Live2DModel = PIXI?.live2d?.Live2DModel
+        // Use the imported modules directly
         if (!PIXI || !Live2DModel) throw new Error("PIXI or Live2DModel unavailable")
 
-        // Create Pixi app bound to our canvas
+        // Create Pixi app bound to our canvas (PIXI v7 API)
         const container = containerRef.current!
         const app = new PIXI.Application({
           view: canvasRef.current,
           autoStart: true,
           backgroundAlpha: 0,
           backgroundColor: 0x000000,
-          // Do not rely on window; we will manage resize to container explicitly
+          resolution: window.devicePixelRatio || 1,
+          autoDensity: true
         })
         appRef.current = app
         // Ensure canvas fills container
@@ -172,10 +212,60 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
         fit()
         window.addEventListener("resize", fit)
 
-        // Load Live2D model from public path (copied from Kalidokit demo)
-        const modelUrl = "/demo-models/hiyori/hiyori_pro_t10.model3.json"
-        const model = await Live2DModel.from(modelUrl, { autoInteract: false })
+        // Load Live2D model from public path (using new API)
+        const modelUrl = "/models/yaorui/YaoRui Swimsuit Maid.model3.json"
+        const model = await Live2DModel.from(modelUrl, {
+          autoInteract: false,
+          ticker: app.ticker  // PIXI v7 requires explicit ticker
+        })
         modelRef.current = model
+        // 暴露全局调试句柄
+        try { (window as any).__live2d = { model, core: (model as any)?.internalModel?.coreModel } } catch {}
+        // 可选：通过 localStorage('studio.disableExpression'='1') 禁用表达式以排查覆盖
+        try {
+          const disableExpr = (typeof localStorage !== 'undefined') && localStorage.getItem('studio.disableExpression') === '1'
+          if (disableExpr) (model as any).internalModel.expressionManager = undefined
+        } catch {}
+
+        // 自动探测该模型可用的“嘴部开合/嘴形”参数（从 cdi3.json 读取友好名称做模糊匹配）
+        try {
+          const displayInfoPath = (model as any)?.internalModel?.settings?.FileReferences?.DisplayInfo || (model as any)?.internalModel?.settings?.DisplayInfo
+          if (displayInfoPath) {
+            const basePath = modelUrl.split('/').slice(0, -1).join('/')
+            const url = `${basePath}/${displayInfoPath}`
+            const res = await fetch(encodeURI(url))
+            if (res.ok) {
+              const cdi = await res.json()
+              const openIds: string[] = []
+              const formIds: string[] = []
+              const mouthKeywordsOpen = ["嘴", "开", "开闭", "下巴", "MouthOpen", "MouthOpenY", "Jaw"]
+              const mouthKeywordsForm = ["嘴", "形", "变形", "撅", "嘟", "歪", "MouthForm", "Smile"]
+              for (const p of cdi?.Parameters || []) {
+                const id: string = p?.Id || ""
+                const name: string = p?.Name || ""
+                const groupName: string = p?.GroupId || ""
+                const combined = `${id} ${name} ${groupName}`
+                const hasOpen = mouthKeywordsOpen.some(k => combined.includes(k))
+                const hasForm = mouthKeywordsForm.some(k => combined.includes(k))
+                if (hasOpen) openIds.push(id)
+                if (hasForm) formIds.push(id)
+              }
+              // 兜底：如果没匹配到任何参数，加入常见自定义ID
+              if (openIds.length) {
+                mouthOpenParamIdsRef.current = Array.from(new Set(["ParamMouthOpenY", ...openIds]))
+              } else {
+                mouthOpenParamIdsRef.current = ["ParamMouthOpenY", "Param55", "Param"]
+              }
+              if (formIds.length) {
+                mouthFormParamIdsRef.current = Array.from(new Set(["ParamMouthForm", ...formIds]))
+              } else {
+                mouthFormParamIdsRef.current = ["ParamMouthForm", "Param2", "Param3", "Param4", "Param5"]
+              }
+              console.log("[DemoLive2D] Mouth param candidates:", { open: mouthOpenParamIdsRef.current, form: mouthFormParamIdsRef.current })
+            }
+          }
+        } catch (e) { console.warn("[DemoLive2D] mouth param auto-detect failed", e) }
+
 
         model.scale.set(0.45)
         model.interactive = true
@@ -327,20 +417,19 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
                   setParam("ParamAngleY", lerp(currentY, rx, 0.35))  // Y=Pitch
                   setParam("ParamAngleZ", lerp(currentZ, rz, 0.35))  // Z=Roll
 
-                  // 头部位置 - 如果模型支持
-                  if (face.head.position) {
-                    try {
-                      const posX = (face.head.position.x ?? 0.5) - 0.5 // 转换为 -0.5 到 0.5
-                      const posY = (face.head.position.y ?? 0.5) - 0.5
+                  // 身体旋转 - YaoRui 模型支持身体旋转参数
+                  try {
+                    // 使用头部旋转数据来驱动身体旋转，但幅度更小
+                    const bodyIntensity = 0.3 // 身体旋转强度比头部小
+                    const currentBodyX = getParam("ParamBodyAngleX")
+                    const currentBodyY = getParam("ParamBodyAngleY")
+                    const currentBodyZ = getParam("ParamBodyAngleZ")
 
-                      const currentPosX = getParam("ParamBodyX")
-                      const currentPosY = getParam("ParamBodyY")
-
-                      setParam("ParamBodyX", lerp(currentPosX, posX * 2, 0.2)) // 放大范围
-                      setParam("ParamBodyY", lerp(currentPosY, -posY * 2, 0.2)) // Y轴反转
-                    } catch {
-                      // 模型可能没有身体位置参数
-                    }
+                    setParam("ParamBodyAngleX", lerp(currentBodyX, ry * bodyIntensity, 0.15)) // 身体跟随头部，但更慢更小
+                    setParam("ParamBodyAngleY", lerp(currentBodyY, rx * bodyIntensity, 0.15))
+                    setParam("ParamBodyAngleZ", lerp(currentBodyZ, rz * bodyIntensity, 0.15))
+                  } catch {
+                    // 模型可能没有身体旋转参数
                   }
                 }
 
@@ -418,84 +507,75 @@ export default function DemoLive2D({ active, className, stream, tuning }: { acti
                 if (face.mouth) {
                   const prevMouth = prevMouthStateRef.current
 
-                  // 第一层：原始数据平滑（使用详细设置配置）
-                  const rawMouthOpen = clamp(face.mouth.y || 0, 0, 1)
-                  const mouthRawSmooth = faceSettings?.smoothing?.mouthRaw ?? 0.5
-                  const smoothedRawOpen = lerp(prevMouth.rawOpenY, rawMouthOpen, mouthRawSmooth)
-                  prevMouth.rawOpenY = smoothedRawOpen
+                  // 调试：输出原始嘴部数据
+                  if (Math.random() < 0.01) { // 1% 概率输出调试信息
+                    console.log("[DemoLive2D] 🎭 嘴部处理开始:", {
+                      rawMouthX: face.mouth.x,
+                      rawMouthY: face.mouth.y,
+                      hasShape: !!face.mouth.shape,
+                      currentParamOpen: getParam("ParamMouthOpenY"),
+                      currentParamForm: getParam("ParamMouthForm")
+                    })
+                  }
 
-                  // 第二层：应用层平滑（使用详细设置配置）
-                  const mouthFinalSmooth = faceSettings?.smoothing?.mouthFinal ?? 0.3
-                  const currentOpen = getParam("ParamMouthOpenY")
-                  const finalOpen = lerp(currentOpen, smoothedRawOpen, mouthFinalSmooth)
-                  setParam("ParamMouthOpenY", finalOpen)
-                  prevMouth.openY = finalOpen
+                  // 还原为 Kalidokit 默认嘴部映射
+                  // OpenY = clamp(mouth.y, 0, 1)
+                  // Form  = clamp(I - U, -1, 1); 若无 shape 则退化为 mouth.x
+                  const mouthY = clamp(face.mouth.y ?? 0, 0, 1)
+                  const I = clamp(face.mouth.shape?.I ?? 0, 0, 1)
+                  const U = clamp(face.mouth.shape?.U ?? 0, 0, 1)
+                  const hasShape = !!face.mouth.shape
+                  const mouthForm = hasShape ? clamp(I - U, -1, 1) : clamp(face.mouth.x ?? 0, -1, 1)
 
-                  // 嘴形变化 - Kalidokit 风格的多层平滑处理
-                  let rawMouthForm = 0
+                  // 确保（在未接入音频时）使用面捕驱动
+                  try { setParam("ParamSilence", 1) } catch {}
 
-                  if (face.mouth.shape) {
-                    // 方法1：使用 I - U（原有方式）- 增强权重
-                    const mouthI = clamp(face.mouth.shape.I || 0, 0, 1)
-                    const mouthU = clamp(face.mouth.shape.U || 0, 0, 1)
-                    const shapeForm = mouthI - mouthU
+                  // 写入张口参数
+                  for (const id of mouthOpenParamIdsRef.current) {
+                    try { setParam(id, mouthY) } catch {}
+                  }
 
-                    // 方法2：直接使用 mouth.x（更直接）- 大幅增强
-                    const directForm = face.mouth.x || 0
+                  // 融合 MediaPipe BlendShapes 的微笑分数
+                  let smileBS = 0
+                  try {
+                    const bs: any[] = (face as any).blendshapes || []
+                    const pick = (name: string) => bs.find((b: any) => b?.categoryName === name)?.score || 0
+                    const candidates = [
+                      pick('smileLeft'), pick('smileRight'),
+                      pick('mouthSmileLeft'), pick('mouthSmileRight'),
+                    ]
 
-                    // 方法3：检测微笑特征（I 音素高 + 轻微张口）- 增强
-                    const smileIndicator = mouthI > 0.2 && rawMouthOpen > 0.03 && rawMouthOpen < 0.5 ? 0.5 : 0
+                    // 舌头联动已在 MediaPipe 模式下移除（tongueOut 可靠性不足）
+                    smileBS = Math.max(0, ...candidates)
+                  } catch {}
 
-                    // 方法4：新增 - 任何正值都视为微笑
-                    const anyPositive = Math.max(0, directForm, mouthI, shapeForm) * 0.6
-
-                    // 综合计算，使用最大值而不是加权平均
-                    rawMouthForm = Math.max(
-                      shapeForm * 1.0,           // 提高权重
-                      directForm * 1.2,          // 大幅提高权重
-                      smileIndicator,            // 微笑特征检测
-                      anyPositive                // 新增：任何正值检测
-                    )
-
-                    // 使用详细设置的微笑放大倍数
-                    const smileAmplification = faceSettings?.smile?.amplification ?? 3.2
-                    if (rawMouthForm > 0) {
-                      rawMouthForm = Math.min(1, rawMouthForm * smileAmplification)
+                  // 读取可调融合比例（0-1），默认 0.6
+                  let smileBlend = 0.6
+                  try {
+                    const v = localStorage.getItem('studio.smileBlend')
+                    if (v != null) {
+                      const n = Number(v)
+                      if (!Number.isNaN(n)) smileBlend = Math.min(1, Math.max(0, n))
                     }
-                  } else {
-                    // 如果没有 shape 数据，使用详细设置的放大倍数
-                    const smileAmplification = faceSettings?.smile?.amplification ?? 3.2
-                    rawMouthForm = (face.mouth.x || 0) * (smileAmplification * 0.875) // 0.875 = 2.8/3.2 的比例
+                  } catch {}
+
+                  const finalForm = lerp(mouthForm, smileBS, smileBlend)
+
+                  // 写入口型参数（融合后）
+                  for (const id of mouthFormParamIdsRef.current) {
+                    try { setParam(id, finalForm) } catch {}
                   }
 
-                  // 第一层：原始嘴形数据平滑（使用详细设置配置）
-                  const smoothedRawForm = lerp(prevMouth.rawForm, rawMouthForm, mouthRawSmooth)
-                  prevMouth.rawForm = smoothedRawForm
+                  // 联动：下巴与嘴宽（基于融合结果）
+                  try { setParam('Param55', mouthY) } catch {}
+                  try { setParam('Param', Math.max(0, finalForm)) } catch {}
 
-                  // 适度微笑增强器：应用到平滑后的数据
-                  let enhancedForm = smoothedRawForm
-                  if (enhancedForm > 0.1) {
-                    enhancedForm = Math.min(1, enhancedForm * 1.3)
-                  }
-                  if (enhancedForm > 0.3) {
-                    enhancedForm = Math.min(1, enhancedForm * 1.2)
-                  }
-                  if (enhancedForm > 0.5) {
-                    enhancedForm = Math.min(1, enhancedForm * 1.1)
+                  // 调试：偶尔输出当前值
+                  if (Math.random() < 0.01) {
+                    console.log("[DemoLive2D] 😀 微笑融合:", { mouthY, mouthForm, smileBS, smileBlend, finalForm, I, U, hasShape })
                   }
 
-                  // 温和的微笑检测：对微小信号适度放大
-                  if (enhancedForm > 0.01 && enhancedForm < 0.2) {
-                    enhancedForm = Math.min(1, enhancedForm * 5.0)
-                  }
-
-                  enhancedForm = clamp(enhancedForm, -1, 1)
-
-                  // 第二层：最终应用层平滑（使用详细设置配置）
-                  const currentForm = getParam("ParamMouthForm")
-                  const finalForm = lerp(currentForm, enhancedForm, mouthFinalSmooth)
-                  setParam("ParamMouthForm", finalForm)
-                  prevMouth.form = finalForm
+                  // 旧的复杂平滑逻辑已移除，现在使用默认映射
 
                   // 多层平滑调试输出 - 受详细设置控制
                   const showSmileDebug = faceSettings?.debug?.showSmileDebug ?? false
